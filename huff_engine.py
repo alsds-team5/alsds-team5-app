@@ -9,11 +9,21 @@
 #     or opens a new one if none is provided.
 #   - Structured return: now returns predicted_visits, market_share,
 #     competitors, runtime_ms, and notes.
-#   - Queries the Competitor_Summary table (built by migration_v2.py)
-#     for pre-computed competitor utility sums.
+#   - Queries the cbg_category_competitor_utility table for pre-computed
+#     competitor utility sums.
 #   - All user inputs use parameterized SQL queries (? placeholders).
 #   - Updated to use a relative database path for GitHub compatibility.
 #     Database must be located at: Data/urban_ai_v2.db
+#
+# BUG FIXES (V3 corrected):
+#   - Fixed table name: was querying non-existent "Competitor_Summary";
+#     now correctly queries "cbg_category_competitor_utility" with column
+#     "competitor_utility_sum". The wrong table caused u_existing = 0 for
+#     every CBG, making p_new = 1.0 always and massively inflating results.
+#   - Fixed market_share calculation: was averaging p_new across all CBGs
+#     (including zero-demand ones), which is not meaningful. Now calculated
+#     as predicted_visits / total_category_demand, which is the correct
+#     definition of market share.
 #
 # NOTE:
 #   Predicted visit counts may differ slightly from the V1 CSV-based engine
@@ -69,7 +79,6 @@ def lookup_category_and_params(conn: sqlite3.Connection, user_input: str) -> dic
            OR  naics_code   = ?
         LIMIT 1
     """
-    # Security: user_input is passed as a parameter, never interpolated.
     row = conn.execute(sql, (user_input, user_input)).fetchone()
 
     if row is None:
@@ -95,7 +104,7 @@ def lookup_category_and_params(conn: sqlite3.Connection, user_input: str) -> dic
 def get_cbgs(conn: sqlite3.Connection):
     """
     Fetches all CBG identifiers and their EPSG:26919 projected coordinates
-    from the enriched cbg_master table. No user input → no parameters needed.
+    from the enriched cbg_master table. No user input -> no parameters needed.
     """
     sql = """
         SELECT cbg, x_26919, y_26919
@@ -111,19 +120,23 @@ def get_precomputed_competitor_utilities(
 ) -> dict:
     """
     Fetches the pre-computed competitor utility sums from the
-    Competitor_Summary table (built by migration_v2.py).
-    Returns a dict mapping geoid (str) → utility_sum (float).
+    cbg_category_competitor_utility table (built by migration_script.py).
+    Returns a dict mapping cbg (str) -> competitor_utility_sum (float).
     Uses a parameterized query: top_category is a ? placeholder.
+
+    NOTE: The previous version queried a table called "Competitor_Summary"
+    which does not exist in the database. This caused every CBG to fall back
+    to u_existing = 0.0, making p_new = 1.0 for all CBGs and producing
+    wildly inflated predicted visit counts.
     """
     sql = """
-        SELECT geoid, utility_sum
-        FROM   Competitor_Summary
+        SELECT cbg, competitor_utility_sum
+        FROM   cbg_category_competitor_utility
         WHERE  top_category = ?
     """
-    # Security: top_category is passed as a parameter.
     rows = conn.execute(sql, (top_category,)).fetchall()
     return {
-        str(row["geoid"]).strip(): float(row["utility_sum"])
+        str(row["cbg"]).strip(): float(row["competitor_utility_sum"])
         for row in rows
     }
 
@@ -132,14 +145,13 @@ def get_category_demand(conn: sqlite3.Connection, top_category: str) -> dict:
     """
     Fetches total observed visit demand per CBG for the given category.
     Uses a parameterized query: top_category is a ? placeholder.
-    Returns a dict mapping cbg (str) → total_category_demand (float).
+    Returns a dict mapping cbg (str) -> total_category_demand (float).
     """
     sql = """
         SELECT cbg, total_category_demand
         FROM   cbg_category_demand
         WHERE  top_category = ?
     """
-    # Security: top_category is passed as a parameter.
     rows = conn.execute(sql, (top_category,)).fetchall()
     return {
         str(row["cbg"]).strip(): float(row["total_category_demand"])
@@ -179,31 +191,33 @@ def run_huff_model(
       2. Project the user-supplied lat/lon to EPSG:26919.
       3. For each CBG:
            a. Compute new-site utility  u_new = floor_area^alpha / distance^beta
-           b. Fetch pre-computed competitor utility sum from Competitor_Summary
+           b. Fetch pre-computed competitor utility sum from
+              cbg_category_competitor_utility
            c. Huff probability  p_new = u_new / (u_new + u_existing)
            d. Predicted visits  = p_new x total_category_demand
-      4. Sum predicted visits and market share across all CBGs.
+      4. Sum predicted visits across all CBGs.
+      5. Market share = predicted_visits / total_category_demand (correct
+         definition: what fraction of all category demand goes to new site).
 
     Parameters
     ----------
-    candidate_lat     : float    — WGS-84 latitude of the proposed site
-    candidate_lon     : float    — WGS-84 longitude of the proposed site
-    business_category : str      — Top category name or NAICS code
-    floor_area        : float    — Floor area of the proposed site (sq metres)
-    db_connection     : optional — Pass an existing SQLite connection, or
+    candidate_lat     : float    -- WGS-84 latitude of the proposed site
+    candidate_lon     : float    -- WGS-84 longitude of the proposed site
+    business_category : str      -- Top category name or NAICS code
+    floor_area        : float    -- Floor area of the proposed site (sq metres)
+    db_connection     : optional -- Pass an existing SQLite connection, or
                         leave as None to open a new one automatically.
 
     Returns
     -------
     dict with keys:
-        predicted_visits : float — Total predicted visits from all CBGs
-        market_share     : float — Average Huff probability across CBGs (0.0 - 1.0)
-        competitors      : int   — Number of existing competitor POIs in category
-        runtime_ms       : float — Total execution time in milliseconds
-        notes            : str   — Any warnings (e.g. fallback parameters used)
+        predicted_visits : float -- Total predicted visits from all CBGs
+        market_share     : float -- predicted_visits / total_category_demand
+        competitors      : int   -- Number of existing competitor POIs
+        runtime_ms       : float -- Total execution time in milliseconds
+        notes            : str   -- Any warnings (e.g. fallback parameters used)
     """
 
-    # Start timer for runtime_ms
     start_time = time.perf_counter()
 
     # Use provided connection or open a new one
@@ -212,7 +226,7 @@ def run_huff_model(
     else:
         conn = get_connection()
 
-    # --- Step 1: Fetch model parameters (parameterized query) ---
+    # --- Step 1: Fetch model parameters ---
     params       = lookup_category_and_params(conn, business_category)
     top_category = params["top_category"]
     alpha        = params["alpha"]
@@ -222,16 +236,13 @@ def run_huff_model(
     transformer  = Transformer.from_crs("EPSG:4326", "EPSG:26919", always_xy=True)
     new_x, new_y = transformer.transform(candidate_lon, candidate_lat)
 
-    # --- Step 3: Load CBG coordinates, pre-computed utilities, and demand ---
+    # --- Step 3: Load CBG data ---
     cbgs           = get_cbgs(conn)
     utility_lookup = get_precomputed_competitor_utilities(conn, top_category)
     demand_lookup  = get_category_demand(conn, top_category)
-
-    # --- Step 4: Get competitor count for structured result ---
     competitor_count = get_competitor_count(conn, top_category)
 
     total_predicted_visits = 0.0
-    total_market_share     = 0.0
 
     for row in cbgs:
         cbg = str(row["cbg"]).strip()
@@ -240,37 +251,43 @@ def run_huff_model(
 
         # Distance from CBG centroid to proposed site (metres)
         d_new = math.sqrt((x - new_x) ** 2 + (y - new_y) ** 2)
-        d_new = max(d_new, 1.0)   # floor at 1 m to avoid division by zero
+        d_new = max(d_new, 1.0)  # floor at 1 m to avoid division by zero
 
         # Utility of the proposed new site
         u_new = (floor_area ** alpha) / (d_new ** beta)
 
         # Pre-computed sum of all existing competitor utilities for this CBG
-        # (fetched from Competitor_Summary — no per-CBG loop calculation needed)
         u_existing = utility_lookup.get(cbg, 0.0)
 
         # Huff probability
         denominator = u_new + u_existing
         p_new = (u_new / denominator) if denominator > 0 else 0.0
 
-        # Accumulate predicted visits and market share
-        total_demand            = demand_lookup.get(cbg, 0.0)
+        total_demand           = demand_lookup.get(cbg, 0.0)
         total_predicted_visits += p_new * total_demand
-        total_market_share     += p_new
 
     # Only close the connection if we opened it ourselves
     if db_connection is None:
         conn.close()
 
-    # Calculate runtime in milliseconds
     runtime_ms = (time.perf_counter() - start_time) * 1000
 
-    # Build notes field
+    # --- Market share: predicted visits as a fraction of total category demand ---
+    # FIX: previously this averaged p_new across all CBGs, which is not a
+    # meaningful measure. The correct definition is what share of total
+    # observed category demand is captured by the new site.
+    total_demand_all = sum(demand_lookup.values())
+    market_share = (
+        total_predicted_visits / total_demand_all
+        if total_demand_all > 0
+        else 0.0
+    )
+
     notes = "fallback parameters used" if params["used_fallback"] else ""
 
     return {
         "predicted_visits": round(total_predicted_visits, 2),
-        "market_share":     round(total_market_share / len(cbgs), 4) if len(cbgs) > 0 else 0.0,
+        "market_share":     round(market_share, 4),
         "competitors":      competitor_count,
         "runtime_ms":       round(runtime_ms, 3),
         "notes":            notes,
@@ -278,7 +295,7 @@ def run_huff_model(
 
 
 # =========================
-# MAIN  —  CLI entry point
+# MAIN  --  CLI entry point
 # =========================
 def main():
     print("\n" + "=" * 55)
@@ -286,13 +303,11 @@ def main():
     print("  Database-only | Pre-computed utilities | Secure SQL")
     print("=" * 55 + "\n")
 
-    # Collect user inputs
     candidate_lat     = float(input("Enter latitude  (e.g., 42.27):  ").strip())
     candidate_lon     = float(input("Enter longitude (e.g., -71.80): ").strip())
     business_category = input("Enter Top Category or NAICS code:  ").strip()
     floor_area        = float(input("Enter store size (sq metres):    ").strip())
 
-    # Run prediction
     result = run_huff_model(candidate_lat, candidate_lon, business_category, floor_area)
 
     print("\n" + "=" * 55)
