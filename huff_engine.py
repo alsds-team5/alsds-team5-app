@@ -282,8 +282,8 @@ def run_huff_model(
         if total_demand_all > 0
         else 0.0
     )
-
-notes = "fallback parameters used" if params["used_fallback"] else ""
+    
+    notes = "fallback parameters used" if params["used_fallback"] else ""
 
     return {
         "predicted_visits": round(total_predicted_visits, 2),
