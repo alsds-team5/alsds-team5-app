@@ -1,4 +1,4 @@
-# huff_engine_v3.py
+# huff_engine.py
 # Assignment 6 - Huff Model Inference Engine (V3)
 #
 # KEY CHANGES FROM V2 (huff_engine_v2.py):
@@ -9,17 +9,17 @@
 #     or opens a new one if none is provided.
 #   - Structured return: now returns predicted_visits, market_share,
 #     competitors, runtime_ms, and notes.
-#   - Queries the cbg_category_competitor_utility table for pre-computed
-#     competitor utility sums.
+#   - Queries the Competitor_Summary table (built by migration_v2.py)
+#     for pre-computed competitor utility sums.
 #   - All user inputs use parameterized SQL queries (? placeholders).
 #   - Updated to use a relative database path for GitHub compatibility.
 #     Database must be located at: Data/urban_ai_v2.db
 #
-# BUG FIXES (V3 corrected):
-#   - Fixed table name: was querying non-existent "Competitor_Summary";
-#     now correctly queries "cbg_category_competitor_utility" with column
-#     "competitor_utility_sum". The wrong table caused u_existing = 0 for
-#     every CBG, making p_new = 1.0 always and massively inflating results.
+# BUG FIXES:
+#   - Fixed table/column query: now correctly queries Competitor_Summary
+#     with columns geoid and utility_sum, matching the schema created by
+#     migration_v2.py. A previous version queried cbg_category_competitor_utility
+#     with cbg and competitor_utility_sum, which caused key mismatches.
 #   - Fixed market_share calculation: was averaging p_new across all CBGs
 #     (including zero-demand ones), which is not meaningful. Now calculated
 #     as predicted_visits / total_category_demand, which is the correct
@@ -62,7 +62,7 @@ def get_connection() -> sqlite3.Connection:
 
 # =========================
 # PARAMETERIZED QUERIES
-# All SQL below uses ? placeholders — never f-strings or % formatting.
+# All SQL below uses ? placeholders -- never f-strings or % formatting.
 # This satisfies the security requirement for all user inputs.
 # =========================
 
@@ -120,23 +120,23 @@ def get_precomputed_competitor_utilities(
 ) -> dict:
     """
     Fetches the pre-computed competitor utility sums from the
-    cbg_category_competitor_utility table (built by migration_script.py).
-    Returns a dict mapping cbg (str) -> competitor_utility_sum (float).
+    Competitor_Summary table (built by migration_v2.py).
+    Returns a dict mapping geoid (str) -> utility_sum (float).
     Uses a parameterized query: top_category is a ? placeholder.
 
-    NOTE: The previous version queried a table called "Competitor_Summary"
-    which does not exist in the database. This caused every CBG to fall back
-    to u_existing = 0.0, making p_new = 1.0 for all CBGs and producing
-    wildly inflated predicted visit counts.
+    Competitor_Summary schema (from migration_v2.py):
+        geoid        TEXT  -- CBG identifier, matches cbg_master.cbg
+        top_category TEXT  -- business category
+        utility_sum  REAL  -- pre-computed sum of competitor utilities
     """
     sql = """
-        SELECT cbg, competitor_utility_sum
-        FROM   cbg_category_competitor_utility
+        SELECT geoid, utility_sum
+        FROM   Competitor_Summary
         WHERE  top_category = ?
     """
     rows = conn.execute(sql, (top_category,)).fetchall()
     return {
-        str(row["cbg"]).strip(): float(row["competitor_utility_sum"])
+        str(row["geoid"]).strip(): float(row["utility_sum"])
         for row in rows
     }
 
@@ -191,13 +191,11 @@ def run_huff_model(
       2. Project the user-supplied lat/lon to EPSG:26919.
       3. For each CBG:
            a. Compute new-site utility  u_new = floor_area^alpha / distance^beta
-           b. Fetch pre-computed competitor utility sum from
-              cbg_category_competitor_utility
+           b. Fetch pre-computed competitor utility sum from Competitor_Summary
            c. Huff probability  p_new = u_new / (u_new + u_existing)
            d. Predicted visits  = p_new x total_category_demand
       4. Sum predicted visits across all CBGs.
-      5. Market share = predicted_visits / total_category_demand (correct
-         definition: what fraction of all category demand goes to new site).
+      5. Market share = predicted_visits / total_category_demand.
 
     Parameters
     ----------
@@ -237,9 +235,9 @@ def run_huff_model(
     new_x, new_y = transformer.transform(candidate_lon, candidate_lat)
 
     # --- Step 3: Load CBG data ---
-    cbgs           = get_cbgs(conn)
-    utility_lookup = get_precomputed_competitor_utilities(conn, top_category)
-    demand_lookup  = get_category_demand(conn, top_category)
+    cbgs             = get_cbgs(conn)
+    utility_lookup   = get_precomputed_competitor_utilities(conn, top_category)
+    demand_lookup    = get_category_demand(conn, top_category)
     competitor_count = get_competitor_count(conn, top_category)
 
     total_predicted_visits = 0.0
@@ -257,6 +255,7 @@ def run_huff_model(
         u_new = (floor_area ** alpha) / (d_new ** beta)
 
         # Pre-computed sum of all existing competitor utilities for this CBG
+        # Fetched from Competitor_Summary (geoid matches cbg_master.cbg)
         u_existing = utility_lookup.get(cbg, 0.0)
 
         # Huff probability
@@ -272,17 +271,15 @@ def run_huff_model(
 
     runtime_ms = (time.perf_counter() - start_time) * 1000
 
-    # --- Market share: predicted visits as a fraction of total category demand ---
-    # FIX: previously this averaged p_new across all CBGs, which is not a
-    # meaningful measure. The correct definition is what share of total
-    # observed category demand is captured by the new site.
+    # Market share: predicted visits as a fraction of total category demand.
+    # This answers: "what share of all observed demand does the new site capture?"
     total_demand_all = sum(demand_lookup.values())
     market_share = (
         total_predicted_visits / total_demand_all
         if total_demand_all > 0
         else 0.0
     )
-    
+
     notes = "fallback parameters used" if params["used_fallback"] else ""
 
     return {
