@@ -283,7 +283,17 @@ def run_huff_model(
         else 0.0
     )
 
-    notes = "fallback parameters used" if params["used_fallback"] else ""
+total_demand_all_debug = sum(demand_lookup.values())
+sample_util = list(utility_lookup.values())[:3] if utility_lookup else []
+notes = (
+    f"fallback={params['used_fallback']} | "
+    f"alpha={alpha} beta={beta} | "
+    f"cbgs={len(cbgs)} | "
+    f"util_rows={len(utility_lookup)} | "
+    f"demand_rows={len(demand_lookup)} | "
+    f"total_demand={round(total_demand_all_debug,1)} | "
+    f"sample_utils={[round(v,2) for v in sample_util]}"
+)
 
     return {
         "predicted_visits": round(total_predicted_visits, 2),
