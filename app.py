@@ -1,8 +1,9 @@
 import os
+import threading
 from flask import Flask, request, jsonify, render_template
 from openai import AzureOpenAI
 
-from db import test_connection
+from db import test_connection, get_connection
 
 app = Flask(__name__)
 
@@ -44,6 +45,82 @@ def dbcheck():
 
 
 # -------------------------
+# Module 7 - Migration Routes
+# -------------------------
+
+@app.route("/admin/migrate")
+def admin_migrate():
+    """
+    Spawns the SQLite -> Azure SQL migration inside a background thread.
+    Returns 202 immediately so Gunicorn does not time out.
+    Poll /admin/migrate/status to watch progress.
+    Visit /db_structure to verify when status shows 'completed'.
+    Remove this route after migration is confirmed.
+    """
+    from migrate_to_azure_sql import execute_migration_task, migration_status
+
+    if migration_status["status"] == "running":
+        return jsonify({
+            "message":          "Migration is already running in the background.",
+            "current_progress": migration_status
+        }), 202
+
+    thread        = threading.Thread(target=execute_migration_task)
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({
+        "ok":               True,
+        "message":          "Migration started in the background.",
+        "check_status_url": "/admin/migrate/status"
+    }), 202
+
+
+@app.route("/admin/migrate/status")
+def admin_migrate_status():
+    """
+    Returns the current migration progress.
+    Poll this after visiting /admin/migrate.
+    """
+    from migrate_to_azure_sql import migration_status
+    return jsonify(migration_status)
+
+
+@app.route("/db_structure")
+def db_structure():
+    """
+    Returns all table names and row counts from Azure SQL.
+    Use this to verify the migration completed correctly.
+    """
+    try:
+        conn   = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT t.name   AS TABLE_NAME,
+                   p.rows   AS row_count
+            FROM   sys.tables     t
+            INNER JOIN sys.indexes    i ON t.object_id = i.object_id
+            INNER JOIN sys.partitions p ON i.object_id = p.object_id
+                                       AND i.index_id  = p.index_id
+            WHERE  t.is_ms_shipped = 0
+              AND  i.index_id IN (0, 1)
+            ORDER  BY t.name
+        """)
+
+        result = [
+            {"TABLE_NAME": str(row[0]), "row_count": int(row[1])}
+            for row in cursor.fetchall()
+        ]
+
+        conn.close()
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# -------------------------
 # Run Huff Model
 # -------------------------
 
@@ -54,10 +131,10 @@ def api_run_huff():
 
         data = request.get_json(silent=True) or {}
 
-        candidate_lat = get_first_present(data, ["candidate_lat", "lat", "latitude"])
-        candidate_lon = get_first_present(data, ["candidate_lon", "lon", "lng", "longitude"])
+        candidate_lat     = get_first_present(data, ["candidate_lat", "lat", "latitude"])
+        candidate_lon     = get_first_present(data, ["candidate_lon", "lon", "lng", "longitude"])
         business_category = get_first_present(data, ["business_category", "naics_code", "naics"])
-        floor_area = get_first_present(data, ["floor_area", "floor_area_sqm", "area", "area_sqm"])
+        floor_area        = get_first_present(data, ["floor_area", "floor_area_sqm", "area", "area_sqm"])
 
         missing = []
         if candidate_lat is None:
@@ -71,19 +148,19 @@ def api_run_huff():
 
         if missing:
             return jsonify({
-                "ok": False,
+                "ok":    False,
                 "error": "Missing required inputs: " + ", ".join(missing)
             }), 400
 
         try:
-            candidate_lat = float(candidate_lat)
-            candidate_lon = float(candidate_lon)
-            floor_area = float(floor_area)
+            candidate_lat     = float(candidate_lat)
+            candidate_lon     = float(candidate_lon)
+            floor_area        = float(floor_area)
             business_category = str(business_category).strip()
         except Exception:
             return jsonify({
-                "ok": False,
-                "error": "Invalid input type. Latitude, longitude, and floor area must be numeric. NAICS/business category must be provided."
+                "ok":    False,
+                "error": "Invalid input type. Latitude, longitude, and floor area must be numeric."
             }), 400
 
         if not business_category:
@@ -103,7 +180,7 @@ def api_run_huff():
             candidate_lon=candidate_lon,
             business_category=business_category,
             floor_area=floor_area,
-            db_connection=None  # Teams can replace this with Azure SQL usage
+            db_connection=None
         )
 
         explanation = generate_explanation(result)
@@ -111,12 +188,12 @@ def api_run_huff():
         return jsonify({
             "ok": True,
             "inputs": {
-                "candidate_lat": candidate_lat,
-                "candidate_lon": candidate_lon,
+                "candidate_lat":     candidate_lat,
+                "candidate_lon":     candidate_lon,
                 "business_category": business_category,
-                "floor_area": floor_area
+                "floor_area":        floor_area
             },
-            "result": result,
+            "result":      result,
             "explanation": explanation
         })
 
@@ -131,15 +208,14 @@ def api_run_huff():
 @app.route("/api/ask", methods=["POST"])
 def api_ask():
     try:
-        data = request.get_json(silent=True) or {}
+        data     = request.get_json(silent=True) or {}
         question = data.get("question")
-        result = data.get("result")
+        result   = data.get("result")
 
         if not question or not result:
             return jsonify({"ok": False, "error": "Missing question or result"}), 400
 
         answer = answer_question(question, result)
-
         return jsonify({"ok": True, "answer": answer})
 
     except Exception as e:
@@ -151,13 +227,6 @@ def api_ask():
 # -------------------------
 
 def get_first_present(data, keys):
-    """
-    Returns the first value found in a dictionary from a list of possible keys.
-    This lets the frontend send either:
-      business_category / floor_area
-    or:
-      naics_code / floor_area_sqm
-    """
     for key in keys:
         if key in data and data.get(key) is not None:
             return data.get(key)
@@ -166,10 +235,8 @@ def get_first_present(data, keys):
 
 def safe_competitor_sample(result, n=3):
     competitors = result.get("competitors", [])
-
     if not isinstance(competitors, list):
         return []
-
     return competitors[:n]
 
 
@@ -200,11 +267,11 @@ Explain clearly:
         model=DEPLOYMENT,
         messages=[
             {
-                "role": "system",
+                "role":    "system",
                 "content": "You explain retail analytics and Huff model results clearly for students."
             },
             {
-                "role": "user",
+                "role":    "user",
                 "content": prompt
             }
         ],
@@ -229,18 +296,20 @@ Answer clearly and concisely, grounded in the model output.
 Important rules:
 - Do not invent data.
 - Do not claim that you reran the Huff model.
-- If the user asks to rerun the model with new inputs, explain that the app can rerun the model when the message includes all required inputs: NAICS code, floor area, latitude, and longitude.
+- If the user asks to rerun the model with new inputs, explain that the app can rerun
+  the model when the message includes all required inputs: NAICS code, floor area,
+  latitude, and longitude.
 """
 
     response = client.chat.completions.create(
         model=DEPLOYMENT,
         messages=[
             {
-                "role": "system",
+                "role":    "system",
                 "content": "You are a helpful data science assistant for a location analytics web app."
             },
             {
-                "role": "user",
+                "role":    "user",
                 "content": prompt
             }
         ],
