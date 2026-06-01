@@ -48,42 +48,42 @@ def dbcheck():
 # Module 7 - Migration Routes
 # -------------------------
 
-@app.route("/admin/migrate")
-def admin_migrate():
-    """
-    Spawns the SQLite -> Azure SQL migration inside a background thread.
-    Returns 202 immediately so Gunicorn does not time out.
-    Poll /admin/migrate/status to watch progress.
-    Visit /db_structure to verify when status shows 'completed'.
-    Remove this route after migration is confirmed.
-    """
-    from migrate_to_azure_sql import execute_migration_task, migration_status
+# @app.route("/admin/migrate")
+# def admin_migrate():
+#     """
+#     Spawns the SQLite -> Azure SQL migration inside a background thread.
+#     Returns 202 immediately so Gunicorn does not time out.
+#     Poll /admin/migrate/status to watch progress.
+#     Visit /db_structure to verify when status shows 'completed'.
+#     Remove this route after migration is confirmed.
+#     """
+#     from migrate_to_azure_sql import execute_migration_task, migration_status
 
-    if migration_status["status"] == "running":
-        return jsonify({
-            "message":          "Migration is already running in the background.",
-            "current_progress": migration_status
-        }), 202
+#     if migration_status["status"] == "running":
+#         return jsonify({
+#             "message":          "Migration is already running in the background.",
+#             "current_progress": migration_status
+#         }), 202
 
-    thread        = threading.Thread(target=execute_migration_task)
-    thread.daemon = True
-    thread.start()
+#     thread        = threading.Thread(target=execute_migration_task)
+#     thread.daemon = True
+#     thread.start()
 
-    return jsonify({
-        "ok":               True,
-        "message":          "Migration started in the background.",
-        "check_status_url": "/admin/migrate/status"
-    }), 202
+#     return jsonify({
+#         "ok":               True,
+#         "message":          "Migration started in the background.",
+#         "check_status_url": "/admin/migrate/status"
+#     }), 202
 
 
-@app.route("/admin/migrate/status")
-def admin_migrate_status():
-    """
-    Returns the current migration progress.
-    Poll this after visiting /admin/migrate.
-    """
-    from migrate_to_azure_sql import migration_status
-    return jsonify(migration_status)
+# @app.route("/admin/migrate/status")
+# def admin_migrate_status():
+#     """
+#     Returns the current migration progress.
+#     Poll this after visiting /admin/migrate.
+#     """
+#     from migrate_to_azure_sql import migration_status
+#     return jsonify(migration_status)
 
 
 @app.route("/db_structure")
