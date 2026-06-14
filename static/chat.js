@@ -1,353 +1,861 @@
-const chatMessages = document.getElementById("chatMessages");
-const chatInput = document.getElementById("chatInput");
-const sendBtn = document.getElementById("sendBtn");
+// ============================================================
+// chat.js — Module 9 Improvements
+//
+// Changes from previous version:
+// 1. Accepts business names (not just NAICS codes) via NAICS_LOOKUP
+// 2. Scenario history stored for follow-up and comparison
+// 3. Location comparison triggered by "compare" / "which is better"
+// 4. Chart.js bar chart updates after each model run
+// 5. Follow-up context: coordinates alone reuse stored business/area
+// 6. Topic-aware follow-up detection
+// 7. Scenario labels (Location A, Location B, ...)
+// ============================================================
 
-const state = {
-  step: "category",
-  business_category: null,
-  candidate_lat: null,
-  candidate_lon: null,
-  floor_area: null,
-  last_result: null
+const chatMessages = document.getElementById("chatMessages");
+const chatInput    = document.getElementById("chatInput");
+const sendBtn      = document.getElementById("sendBtn");
+
+// -------------------------
+// Module 9: NAICS Lookup
+// Maps plain business names to NAICS codes in our database.
+// -------------------------
+const NAICS_LOOKUP = {
+    // Hardware / Home Improvement
+    "hardware store":        "4441",
+    "hardware":              "4441",
+    "home improvement":      "4441",
+    "building materials":    "4441",
+    "lumber store":          "4441",
+    "lumber":                "4441",
+    "home depot":            "4441",
+    "lowes":                 "4441",
+    "lowe's":                "4441",
+
+    // Beer / Wine / Liquor
+    "liquor store":          "445310",
+    "wine store":            "445310",
+    "beer store":            "445310",
+    "alcohol store":         "445310",
+    "liquor":                "445310",
+
+    // Auto Parts
+    "auto parts":            "441310",
+    "car parts":             "441310",
+    "tire store":            "441310",
+    "automotive parts":      "441310",
+    "auto":                  "441310",
+
+    // Gas Station
+    "gas station":           "447110",
+    "petrol station":        "447110",
+    "fuel station":          "447110",
+    "gas":                   "447110",
+
+    // Jewelry
+    "jewelry store":         "448310",
+    "jewelry":               "448310",
+    "luggage store":         "448310",
+    "jewellery":             "448310",
+
+    // General Merchandise
+    "general store":         "452319",
+    "warehouse store":       "452319",
+    "department store":      "452319",
+    "superstore":            "452319",
+    "walmart":               "452319",
+    "costco":                "452319",
+    "target":                "452319",
+
+    // Bakery
+    "bakery":                "311811",
+    "bread store":           "311811",
+    "pastry shop":           "311811",
+    "cake shop":             "311811",
+
+    // Bank / Financial
+    "bank":                  "522110",
+    "credit union":          "522110",
+    "financial services":    "522310",
+    "investment office":     "523930",
+    "insurance office":      "524113",
+    "insurance":             "524113",
+
+    // Real Estate
+    "real estate office":    "531210",
+    "real estate agent":     "531210",
+    "real estate":           "531210",
+    "property rental":       "531120",
+    "rental office":         "531120",
+
+    // Education
+    "college":               "611310",
+    "university":            "611310",
+    "school":                "611310",
+    "training center":       "611310",
+
+    // Healthcare
+    "dentist":               "621210",
+    "dental office":         "621210",
+    "dental":                "621210",
+    "clinic":                "6214",
+    "urgent care":           "6214",
+    "outpatient clinic":     "6214",
+    "medical clinic":        "6214",
+    "medical lab":           "621511",
+    "diagnostic lab":        "621511",
+
+    // Personal Services
+    "salon":                 "812910",
+    "spa":                   "812910",
+    "nail salon":            "812910",
+    "barber":                "812910",
+    "barbershop":            "812910",
+    "personal services":     "812910",
+
+    // Telecom
+    "phone store":           "517312",
+    "telecom store":         "517312",
+    "wireless store":        "517312",
+    "mobile store":          "517312",
+    "cell phone store":      "517312",
 };
 
+const NAICS_NAMES = {
+    "4441":   "Building Material and Supplies Dealers",
+    "445310": "Beer, Wine, and Liquor Stores",
+    "441310": "Automotive Parts, Accessories, and Tire Stores",
+    "447110": "Gasoline Stations",
+    "448310": "Jewelry, Luggage, and Leather Goods Stores",
+    "452319": "General Merchandise Stores",
+    "311811": "Bakeries",
+    "522110": "Bank / Credit Institution",
+    "522310": "Financial Services",
+    "523930": "Investment Office",
+    "524113": "Insurance Office",
+    "531120": "Property Rental",
+    "531210": "Real Estate Office",
+    "611310": "College / University",
+    "621210": "Dental Office",
+    "6214":   "Outpatient Clinic",
+    "621511": "Medical / Diagnostic Laboratory",
+    "812910": "Personal Services (Salon / Spa)",
+    "517312": "Telecom / Phone Store",
+    "3399":   "Miscellaneous Manufacturing",
+    "512240": "Sound Recording Studio",
+    "453991": "Miscellaneous Retail Store",
+    "922110": "Justice / Public Safety",
+};
+
+// -------------------------
+// Scenario History (Module 9)
+// Stores each completed model run for comparison and follow-up.
+// -------------------------
+let scenarioHistory = [];
+let scenarioChart   = null;
+
+// Scenario label generator: Location A, Location B, ...
+function getScenarioLabel(index) {
+    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    return "Location " + (letters[index] || (index + 1));
+}
+
+// -------------------------
+// State
+// -------------------------
+const state = {
+    step:              "category",
+    business_category: null,
+    business_name:     null,   // human-readable name
+    candidate_lat:     null,
+    candidate_lon:     null,
+    floor_area:        null,
+    last_result:       null
+};
+
+// -------------------------
+// Welcome message
+// -------------------------
 addBotMessage(
-  "Welcome. I will guide you through a store-location scenario for Worcester, MA. " +
-  "First, enter the business NAICS code. For example: 4441."
+    "Welcome. I will guide you through a store-location scenario for Worcester, MA. " +
+    "You can enter a NAICS code (e.g., 4441) or describe your business type " +
+    "(e.g., 'hardware store', 'bakery', 'dental office')."
 );
 
+// -------------------------
+// Event listeners
+// -------------------------
 sendBtn.addEventListener("click", handleSend);
-
 chatInput.addEventListener("keydown", function (event) {
-  if (event.key === "Enter") {
-    handleSend();
-  }
+    if (event.key === "Enter") handleSend();
 });
 
 window.onMapLocationSelected = function (location) {
-  state.candidate_lat = location.lat;
-  state.candidate_lon = location.lon;
-
-  if (state.step === "location") {
-    addBotMessage(
-      `Great, I captured the candidate location: ${location.lat.toFixed(6)}, ${location.lon.toFixed(6)}. ` +
-      "Now enter the proposed store floor area in square meters."
-    );
-    state.step = "floor_area";
-  }
-};
-
-async function handleSend() {
-  const text = chatInput.value.trim();
-  if (!text) return;
-
-  addUserMessage(text);
-  chatInput.value = "";
-
-  try {
-    /*
-      IMPORTANT:
-      Before treating the message as a normal follow-up question,
-      check whether the user is asking to rerun the model with a new full set of inputs.
-
-      Example supported message:
-      "use 42.229212, -71.805525 and rerun the model for NAICS code 4441 and area of 1000 square meters"
-    */
-    const rerunInputs = extractRerunInputs(text);
-
-    if (rerunInputs) {
-      await rerunModelFromMessage(rerunInputs);
-      return;
-    }
-
-    if (state.step === "category") {
-      const naicsCode = text.trim();
-
-      if (!/^\d+$/.test(naicsCode)) {
-        addBotMessage("Please enter a numeric NAICS code. For example: 4441.");
-        return;
-      }
-
-      state.business_category = naicsCode;
-      state.step = "location";
-
-      addBotMessage(
-        "Good. Now click the proposed store location on the map. " +
-        "You can also type coordinates as: 42.24, -71.78"
-      );
-      return;
-    }
+    state.candidate_lat = location.lat;
+    state.candidate_lon = location.lon;
 
     if (state.step === "location") {
-      const coords = parseCoordinates(text);
-
-      if (!coords) {
-        addBotMessage("Please click the map or type coordinates in this format: 42.24, -71.78");
-        return;
-      }
-
-      state.candidate_lat = coords.lat;
-      state.candidate_lon = coords.lon;
-
-      if (window.setCandidateLocation) {
-        window.setCandidateLocation(coords.lat, coords.lon, false);
-      }
-
-      state.step = "floor_area";
-      addBotMessage("Great. Now enter the proposed store floor area in square meters.");
-      return;
+        addBotMessage(
+            `Great, I captured the candidate location: ${location.lat.toFixed(6)}, ${location.lon.toFixed(6)}. ` +
+            "Now enter the proposed store floor area in square meters."
+        );
+        state.step = "floor_area";
     }
+};
 
-    if (state.step === "floor_area") {
-      const area = Number(text.replace(/,/g, ""));
 
-      if (!Number.isFinite(area) || area <= 0) {
-        addBotMessage("Please enter a positive numeric floor area, such as 1000.");
-        return;
-      }
+// -------------------------
+// Main message handler
+// -------------------------
+async function handleSend() {
+    const text = chatInput.value.trim();
+    if (!text) return;
 
-      state.floor_area = area;
-      state.step = "ready";
+    addUserMessage(text);
+    chatInput.value = "";
 
-      addBotMessage(
-        `Thanks. I will run the Huff model for NAICS ${state.business_category}, ` +
-        `location (${state.candidate_lat.toFixed(6)}, ${state.candidate_lon.toFixed(6)}), ` +
-        `and floor area ${state.floor_area} square meters.`
-      );
+    try {
+        // 1. Check for a full rerun with all inputs in one message
+        const rerunInputs = extractRerunInputs(text);
+        if (rerunInputs) {
+            await rerunModelFromMessage(rerunInputs);
+            return;
+        }
 
-      await runModel();
-      return;
+        // 2. Initial guided flow
+        if (state.step === "category") {
+            await handleCategoryStep(text);
+            return;
+        }
+
+        if (state.step === "location") {
+            handleLocationStep(text);
+            return;
+        }
+
+        if (state.step === "floor_area") {
+            await handleFloorAreaStep(text);
+            return;
+        }
+
+        // 3. Post-run follow-up
+        if (state.step === "ready") {
+            // Check for comparison request
+            if (isComparisonRequest(text) && scenarioHistory.length >= 2) {
+                renderComparison();
+                await explainComparison(text);
+                return;
+            }
+
+            // Check for coordinate-only follow-up (reuse stored business + area)
+            const coords = parseCoordinates(text);
+            if (coords && state.business_category && state.floor_area && !extractFullRerunInputs(text)) {
+                addBotMessage(
+                    `I will rerun the model with the same business (${state.business_name || "NAICS " + state.business_category}) ` +
+                    `and floor area (${state.floor_area} sqm) at the new location ` +
+                    `${coords.lat.toFixed(6)}, ${coords.lon.toFixed(6)}.`
+                );
+                await rerunModelFromMessage({
+                    business_category: state.business_category,
+                    business_name:     state.business_name,
+                    candidate_lat:     coords.lat,
+                    candidate_lon:     coords.lon,
+                    floor_area:        state.floor_area
+                });
+                return;
+            }
+
+            // Regular follow-up question
+            await askQuestion(text);
+            return;
+        }
+
+    } catch (error) {
+        addErrorMessage(error.message || String(error));
     }
-
-    if (state.step === "ready") {
-      await askQuestion(text);
-      return;
-    }
-  } catch (error) {
-    addErrorMessage(error.message || String(error));
-  }
 }
 
+
+// -------------------------
+// Step handlers
+// -------------------------
+async function handleCategoryStep(text) {
+    // Accept numeric NAICS code directly
+    if (/^\d+$/.test(text.trim())) {
+        const naics = text.trim();
+        state.business_category = naics;
+        state.business_name     = NAICS_NAMES[naics] || `NAICS ${naics}`;
+        state.step = "location";
+        addBotMessage(
+            `Got it — NAICS code ${naics} (${state.business_name}). ` +
+            "Now click the proposed store location on the map. " +
+            "You can also type coordinates as: 42.24, -71.78"
+        );
+        return;
+    }
+
+    // Try to resolve a plain business name
+    const resolved = resolveBusinessName(text);
+    if (resolved) {
+        state.business_category = resolved.naics;
+        state.business_name     = text.trim();
+        state.step = "location";
+        addBotMessage(
+            `I mapped "${text.trim()}" to NAICS ${resolved.naics} (${resolved.name}). ` +
+            "Now click the proposed store location on the map. " +
+            "You can also type coordinates as: 42.24, -71.78"
+        );
+        return;
+    }
+
+    // Try the backend resolver for anything not in the local dictionary
+    try {
+        const resp = await fetch("/api/resolve_category", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: text.trim() })
+        });
+        const data = await resp.json();
+        if (data.ok && data.matched) {
+            state.business_category = data.naics_code;
+            state.business_name     = text.trim();
+            state.step = "location";
+            addBotMessage(
+                `I mapped "${text.trim()}" to NAICS ${data.naics_code} (${data.category_name}). ` +
+                "Now click the proposed store location on the map, " +
+                "or type coordinates as: 42.24, -71.78"
+            );
+            return;
+        }
+    } catch (_) { /* fallthrough */ }
+
+    // Could not resolve
+    addBotMessage(
+        `I could not identify "${text.trim()}" as a business category. ` +
+        "Please enter a numeric NAICS code (e.g., 4441 for hardware stores) " +
+        "or try a more specific description like 'hardware store', 'bakery', or 'dental office'."
+    );
+}
+
+function handleLocationStep(text) {
+    const coords = parseCoordinates(text);
+    if (!coords) {
+        addBotMessage("Please click the map or type coordinates in this format: 42.24, -71.78");
+        return;
+    }
+
+    state.candidate_lat = coords.lat;
+    state.candidate_lon = coords.lon;
+
+    if (window.setCandidateLocation) {
+        window.setCandidateLocation(coords.lat, coords.lon, false);
+    }
+
+    state.step = "floor_area";
+    addBotMessage("Great. Now enter the proposed store floor area in square meters.");
+}
+
+async function handleFloorAreaStep(text) {
+    const area = Number(text.replace(/,/g, ""));
+
+    if (!Number.isFinite(area) || area <= 0) {
+        addBotMessage("Please enter a positive numeric floor area, such as 1000.");
+        return;
+    }
+
+    state.floor_area = area;
+    state.step = "ready";
+
+    addBotMessage(
+        `Thanks. I will run the Huff model for ${state.business_name || "NAICS " + state.business_category}, ` +
+        `location (${state.candidate_lat.toFixed(6)}, ${state.candidate_lon.toFixed(6)}), ` +
+        `and floor area ${state.floor_area} square meters.`
+    );
+
+    await runModel();
+}
+
+
+// -------------------------
+// Model execution
+// -------------------------
 async function rerunModelFromMessage(inputs) {
-  state.business_category = inputs.business_category;
-  state.candidate_lat = inputs.candidate_lat;
-  state.candidate_lon = inputs.candidate_lon;
-  state.floor_area = inputs.floor_area;
-  state.step = "ready";
+    state.business_category = inputs.business_category;
+    state.business_name     = inputs.business_name || NAICS_NAMES[inputs.business_category] || `NAICS ${inputs.business_category}`;
+    state.candidate_lat     = inputs.candidate_lat;
+    state.candidate_lon     = inputs.candidate_lon;
+    state.floor_area        = inputs.floor_area;
+    state.step              = "ready";
 
-  addBotMessage(
-    `I found a new complete model input set. I will rerun the Huff model for NAICS ${state.business_category}, ` +
-    `location (${state.candidate_lat.toFixed(6)}, ${state.candidate_lon.toFixed(6)}), ` +
-    `and floor area ${state.floor_area} square meters.`
-  );
+    addBotMessage(
+        `Running the model for ${state.business_name}, ` +
+        `location (${state.candidate_lat.toFixed(6)}, ${state.candidate_lon.toFixed(6)}), ` +
+        `floor area ${state.floor_area} sqm.`
+    );
 
-  if (window.setCandidateLocation) {
-    window.setCandidateLocation(state.candidate_lat, state.candidate_lon, false);
-  }
+    if (window.setCandidateLocation) {
+        window.setCandidateLocation(state.candidate_lat, state.candidate_lon, false);
+    }
 
-  await runModel();
+    await runModel();
 }
 
 async function runModel() {
-  addBotMessage("Running the model now...");
+    addBotMessage("Running the model now...");
 
-  const response = await fetch("/api/run_huff", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      candidate_lat: state.candidate_lat,
-      candidate_lon: state.candidate_lon,
-      business_category: state.business_category,
-      floor_area: state.floor_area,
+    const response = await fetch("/api/run_huff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            candidate_lat:     state.candidate_lat,
+            candidate_lon:     state.candidate_lon,
+            business_category: state.business_category,
+            floor_area:        state.floor_area,
+            naics_code:        state.business_category,
+            floor_area_sqm:    state.floor_area
+        })
+    });
 
-      // Optional aliases for clearer backend compatibility
-      naics_code: state.business_category,
-      floor_area_sqm: state.floor_area
-    })
-  });
+    const data = await response.json();
 
-  const data = await response.json();
+    if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Model failed.");
+    }
 
-  if (!response.ok || !data.ok) {
-    throw new Error(data.error || "Model failed.");
-  }
+    state.last_result = data.result;
 
-  state.last_result = data.result;
+    // Store in scenario history
+    const label = getScenarioLabel(scenarioHistory.length);
+    scenarioHistory.push({
+        label:  label,
+        inputs: {
+            business_category: state.business_category,
+            business_name:     state.business_name,
+            lat:               state.candidate_lat,
+            lon:               state.candidate_lon,
+            floor_area:        state.floor_area
+        },
+        result: data.result
+    });
 
-  renderResult(data.result);
+    // Update results panel and chart
+    renderResult(data.result, label);
+    updateScenarioChart();
 
-  if (window.plotCompetitors) {
-    window.plotCompetitors(data.result.competitors);
-  }
+    // Load competitor POIs on map if available
+    if (window.loadCompetitorPois) {
+        window.loadCompetitorPois(state.business_category);
+    } else if (window.plotCompetitors) {
+        window.plotCompetitors(data.result.competitors);
+    }
 
-  addBotMessage(
-    data.explanation ||
-    "Model completed. You can now ask follow-up questions about the result, or provide a new NAICS code, area, and coordinates to rerun the model."
-  );
+    addBotMessage(
+        data.explanation ||
+        `${label} result is ready. You can ask follow-up questions, ` +
+        "provide new coordinates for another scenario, or type 'compare' to compare locations."
+    );
+
+    // Hint about comparison once 2+ scenarios exist
+    if (scenarioHistory.length === 2) {
+        addBotMessage(
+            "You now have two scenarios. Type 'compare locations' or 'which is better' to see a side-by-side comparison."
+        );
+    }
 }
 
+
+// -------------------------
+// Ask follow-up question
+// -------------------------
 async function askQuestion(question) {
-  if (!state.last_result) {
-    addBotMessage("Please complete a model run first.");
-    return;
-  }
+    if (!state.last_result) {
+        addBotMessage("Please complete a model run first.");
+        return;
+    }
 
-  const response = await fetch("/api/ask", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      question,
-      result: state.last_result
-    })
-  });
+    const response = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            question,
+            result: state.last_result
+        })
+    });
 
-  const data = await response.json();
+    const data = await response.json();
 
-  if (!response.ok || !data.ok) {
-    throw new Error(data.error || "The assistant could not answer.");
-  }
+    if (!response.ok || !data.ok) {
+        throw new Error(data.error || "The assistant could not answer.");
+    }
 
-  addBotMessage(data.answer);
+    addBotMessage(data.answer);
+}
+
+
+// -------------------------
+// Comparison (Module 9)
+// -------------------------
+function isComparisonRequest(text) {
+    const lower = text.toLowerCase();
+    return lower.includes("compare") ||
+           lower.includes("which is better") ||
+           lower.includes("which location") ||
+           lower.includes("best location") ||
+           lower.includes("versus") ||
+           lower.includes(" vs ") ||
+           lower.includes("difference between") ||
+           lower.includes("side by side") ||
+           lower.includes("side-by-side");
+}
+
+function renderComparison() {
+    const section = document.getElementById("comparisonSection");
+    if (!section || scenarioHistory.length < 2) return;
+
+    let tableRows = "";
+    const headers = scenarioHistory.map(s => `<th>${escapeHtml(s.label)}</th>`).join("");
+
+    // Predicted Visits row
+    const visits  = scenarioHistory.map(s => s.result.predicted_visits);
+    const maxVisit = Math.max(...visits);
+    tableRows += `<tr>
+        <td><strong>Predicted Visits</strong></td>
+        ${scenarioHistory.map((s, i) =>
+            `<td class="${visits[i] === maxVisit ? "better" : ""}">${escapeHtml(s.result.predicted_visits)}</td>`
+        ).join("")}
+    </tr>`;
+
+    // Market Share row
+    const shares   = scenarioHistory.map(s => s.result.market_share);
+    const maxShare = Math.max(...shares);
+    tableRows += `<tr>
+        <td><strong>Market Share</strong></td>
+        ${scenarioHistory.map((s, i) =>
+            `<td class="${shares[i] === maxShare ? "better" : ""}">${(s.result.market_share * 100).toFixed(2)}%</td>`
+        ).join("")}
+    </tr>`;
+
+    // Competitors row
+    const comps    = scenarioHistory.map(s => typeof s.result.competitors === "number" ? s.result.competitors : 0);
+    const minComp  = Math.min(...comps);
+    tableRows += `<tr>
+        <td><strong>Competitors</strong></td>
+        ${scenarioHistory.map((s, i) => {
+            const val = typeof s.result.competitors === "number" ? s.result.competitors : "N/A";
+            return `<td class="${comps[i] === minComp ? "better" : ""}">${escapeHtml(val)}</td>`;
+        }).join("")}
+    </tr>`;
+
+    // Runtime row
+    tableRows += `<tr>
+        <td><strong>Runtime (ms)</strong></td>
+        ${scenarioHistory.map(s => `<td>${escapeHtml(s.result.runtime_ms)}</td>`).join("")}
+    </tr>`;
+
+    // Inputs rows
+    tableRows += `<tr>
+        <td><strong>Business</strong></td>
+        ${scenarioHistory.map(s => `<td>${escapeHtml(s.inputs.business_name || s.inputs.business_category)}</td>`).join("")}
+    </tr>`;
+    tableRows += `<tr>
+        <td><strong>Floor Area (sqm)</strong></td>
+        ${scenarioHistory.map(s => `<td>${escapeHtml(s.inputs.floor_area)}</td>`).join("")}
+    </tr>`;
+    tableRows += `<tr>
+        <td><strong>Coordinates</strong></td>
+        ${scenarioHistory.map(s =>
+            `<td>${s.inputs.lat.toFixed(4)}, ${s.inputs.lon.toFixed(4)}</td>`
+        ).join("")}
+    </tr>`;
+
+    section.innerHTML = `
+        <h3>Location Comparison</h3>
+        <p style="font-size:0.85em;color:#666;">
+            Green cells indicate the stronger result for that metric. 
+            Note: this model does not account for rent, zoning, or parking.
+        </p>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        ${headers}
+                    </tr>
+                </thead>
+                <tbody>
+                    ${tableRows}
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    section.scrollIntoView({ behavior: "smooth" });
+}
+
+async function explainComparison(userQuestion) {
+    if (scenarioHistory.length < 2) return;
+
+    const comparisonData = {
+        type:      "location_comparison",
+        scenarios: scenarioHistory.map(s => ({
+            label:  s.label,
+            inputs: s.inputs,
+            result: s.result
+        }))
+    };
+
+    try {
+        const response = await fetch("/api/ask", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                question: userQuestion || "Compare these locations and explain which performs better and why.",
+                result:   comparisonData
+            })
+        });
+
+        const data = await response.json();
+        if (data.ok) addBotMessage(data.answer);
+    } catch (e) {
+        addBotMessage("I could not generate a comparison explanation. Please check the comparison table above.");
+    }
+}
+
+
+// -------------------------
+// Chart (Module 9)
+// Bar chart showing predicted visits and market share across all scenarios.
+// Answers: "Which location attracts more traffic and captures more market share?"
+// -------------------------
+function updateScenarioChart() {
+    const canvas = document.getElementById("scenarioChart");
+    if (!canvas || scenarioHistory.length === 0) return;
+
+    const labels = scenarioHistory.map(s => s.label);
+    const visits = scenarioHistory.map(s => s.result.predicted_visits || 0);
+    const shares = scenarioHistory.map(s => parseFloat(
+        (s.result.market_share * 100).toFixed(2)
+    ));
+
+    if (scenarioChart) {
+        scenarioChart.data.labels            = labels;
+        scenarioChart.data.datasets[0].data  = visits;
+        scenarioChart.data.datasets[1].data  = shares;
+        scenarioChart.update();
+    } else {
+        const ctx = canvas.getContext("2d");
+        scenarioChart = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels:   labels,
+                datasets: [
+                    {
+                        label:           "Predicted Visits",
+                        data:            visits,
+                        backgroundColor: "rgba(54, 162, 235, 0.75)",
+                        borderColor:     "rgba(54, 162, 235, 1)",
+                        borderWidth:     1,
+                        yAxisID:         "y"
+                    },
+                    {
+                        label:           "Market Share (%)",
+                        data:            shares,
+                        backgroundColor: "rgba(255, 99, 132, 0.75)",
+                        borderColor:     "rgba(255, 99, 132, 1)",
+                        borderWidth:     1,
+                        yAxisID:         "y1"
+                    }
+                ]
+            },
+            options: {
+                responsive:          true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text:    "Scenario Comparison: Visits and Market Share"
+                    },
+                    legend: { position: "top" }
+                },
+                scales: {
+                    y: {
+                        type:     "linear",
+                        position: "left",
+                        title:    { display: true, text: "Predicted Visits" },
+                        beginAtZero: true
+                    },
+                    y1: {
+                        type:     "linear",
+                        position: "right",
+                        title:    { display: true, text: "Market Share (%)" },
+                        beginAtZero: true,
+                        grid:     { drawOnChartArea: false }
+                    }
+                }
+            }
+        });
+    }
+
+    canvas.parentElement.style.display = "block";
+}
+
+
+// -------------------------
+// Input extraction helpers
+// -------------------------
+function resolveBusinessName(text) {
+    const lower = text.toLowerCase().trim();
+    // Exact match first
+    if (NAICS_LOOKUP[lower]) {
+        return { naics: NAICS_LOOKUP[lower], name: NAICS_NAMES[NAICS_LOOKUP[lower]] || lower };
+    }
+    // Partial match (longest key first)
+    const keys = Object.keys(NAICS_LOOKUP).sort((a, b) => b.length - a.length);
+    for (const key of keys) {
+        if (lower.includes(key)) {
+            const code = NAICS_LOOKUP[key];
+            return { naics: code, name: NAICS_NAMES[code] || key };
+        }
+    }
+    return null;
+}
+
+function extractBusinessCategoryFromText(text) {
+    // Try numeric NAICS code first
+    const naicsMatch = text.match(/(?:naics\s*(?:code)?\s*(?:is|=|:|of|for)?\s*)?(\b\d{4,6}\b)/i);
+    if (naicsMatch) return { code: naicsMatch[1], name: NAICS_NAMES[naicsMatch[1]] || naicsMatch[1] };
+
+    // Try business name
+    const resolved = resolveBusinessName(text);
+    if (resolved) return { code: resolved.naics, name: resolved.name };
+
+    return null;
 }
 
 function extractRerunInputs(message) {
-  const coords = parseCoordinates(message);
+    const coords = parseCoordinates(message);
+    if (!coords) return null;
 
-  if (!coords) {
-    return null;
-  }
+    const businessInfo = extractBusinessCategoryFromText(message);
+    if (!businessInfo) return null;
 
-  const naicsMatch =
-    message.match(/naics(?:\s+code)?\s*(?:is|=|:|of|for)?\s*(\d{2,6})/i) ||
-    message.match(/business\s+category\s*(?:is|=|:|of|for)?\s*(\d{2,6})/i) ||
-    message.match(/category\s*(?:is|=|:|of|for)?\s*(\d{2,6})/i);
+    const areaMatch =
+        message.match(/area\s*(?:of|is|=|:)?\s*([\d,]+(?:\.\d+)?)/i) ||
+        message.match(/floor\s+area\s*(?:of|is|=|:)?\s*([\d,]+(?:\.\d+)?)/i) ||
+        message.match(/([\d,]+(?:\.\d+)?)\s*(?:square\s+meters|square\s+metres|sqm|sq\.?\s*m|m2|m²)/i);
 
-  const areaMatch =
-    message.match(/area\s*(?:of|is|=|:)?\s*([\d,]+(?:\.\d+)?)/i) ||
-    message.match(/floor\s+area\s*(?:of|is|=|:)?\s*([\d,]+(?:\.\d+)?)/i) ||
-    message.match(/([\d,]+(?:\.\d+)?)\s*(?:square\s+meters|square\s+metres|sqm|sq\.?\s*m|m2|m²)/i);
+    if (!areaMatch) return null;
 
-  if (!naicsMatch || !areaMatch) {
-    return null;
-  }
+    const floorArea = Number(areaMatch[1].replace(/,/g, ""));
+    if (!Number.isFinite(floorArea) || floorArea <= 0) return null;
 
-  const businessCategory = naicsMatch[1];
-  const floorArea = Number(areaMatch[1].replace(/,/g, ""));
-
-  if (!businessCategory || !Number.isFinite(floorArea) || floorArea <= 0) {
-    return null;
-  }
-
-  return {
-    business_category: businessCategory,
-    candidate_lat: coords.lat,
-    candidate_lon: coords.lon,
-    floor_area: floorArea
-  };
+    return {
+        business_category: businessInfo.code,
+        business_name:     businessInfo.name,
+        candidate_lat:     coords.lat,
+        candidate_lon:     coords.lon,
+        floor_area:        floorArea
+    };
 }
 
-function renderResult(result) {
-  const summary = document.getElementById("resultSummary");
-  const tableWrap = document.getElementById("competitorTable");
-
-  const predictedVisits = result.predicted_visits ?? "N/A";
-  const marketShare = Number(result.market_share);
-  const runtime = result.runtime_ms ?? "N/A";
-  const notes = result.notes ?? "";
-
-  summary.innerHTML = `
-    <strong>Predicted Visits:</strong> ${escapeHtml(predictedVisits)}<br>
-    <strong>Estimated Market Share:</strong> ${Number.isFinite(marketShare) ? (marketShare * 100).toFixed(2) + "%" : "N/A"}<br>
-    <strong>Runtime:</strong> ${escapeHtml(runtime)} ms<br>
-    <strong>Notes:</strong> ${escapeHtml(notes)}
-  `;
-
-  const competitors = Array.isArray(result.competitors) ? result.competitors : [];
-
-  if (competitors.length === 0) {
-    tableWrap.innerHTML = "No competitor records returned.";
-    return;
-  }
-
-  tableWrap.innerHTML = `
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Distance</th>
-          <th>Size</th>
-          <th>Attraction</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${competitors.map(c => `
-          <tr>
-            <td>${escapeHtml(c.name ?? c.place_name ?? c.poi_name ?? "Unknown")}</td>
-            <td>${escapeHtml(c.distance_miles ?? c.distance ?? "N/A")}</td>
-            <td>${escapeHtml(c.size ?? c.floor_area ?? c.area ?? "N/A")}</td>
-            <td>${escapeHtml(c.attraction ?? "N/A")}</td>
-          </tr>
-        `).join("")}
-      </tbody>
-    </table>
-  `;
+// Checks if a message contains full inputs (used to avoid false follow-up detection)
+function extractFullRerunInputs(text) {
+    const coords = parseCoordinates(text);
+    if (!coords) return null;
+    const business = extractBusinessCategoryFromText(text);
+    const areaMatch = text.match(/([\d,]+(?:\.\d+)?)\s*(?:square\s+meters|sqm|m2)/i);
+    return (coords && business && areaMatch) ? true : null;
 }
 
+
+// -------------------------
+// Result rendering
+// -------------------------
+function renderResult(result, label) {
+    const summary   = document.getElementById("resultSummary");
+    const tableWrap = document.getElementById("competitorTable");
+
+    const predictedVisits = result.predicted_visits ?? "N/A";
+    const marketShare     = Number(result.market_share);
+    const runtime         = result.runtime_ms ?? "N/A";
+    const notes           = result.notes ?? "";
+
+    summary.innerHTML = `
+        ${label ? `<div style="font-weight:bold;margin-bottom:6px;color:#2c5282;">${escapeHtml(label)}</div>` : ""}
+        <strong>Predicted Visits:</strong> ${escapeHtml(predictedVisits)}<br>
+        <strong>Estimated Market Share:</strong> ${Number.isFinite(marketShare) ? (marketShare * 100).toFixed(2) + "%" : "N/A"}<br>
+        <strong>Runtime:</strong> ${escapeHtml(runtime)} ms<br>
+        <strong>Notes:</strong> ${escapeHtml(notes)}
+    `;
+
+    const competitors = Array.isArray(result.competitors) ? result.competitors : [];
+
+    if (competitors.length === 0) {
+        tableWrap.innerHTML = "No competitor records returned.";
+        return;
+    }
+
+    tableWrap.innerHTML = `
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Distance</th>
+                    <th>Size</th>
+                    <th>Attraction</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${competitors.map(c => `
+                    <tr>
+                        <td>${escapeHtml(c.name ?? c.place_name ?? c.poi_name ?? "Unknown")}</td>
+                        <td>${escapeHtml(c.distance_miles ?? c.distance ?? "N/A")}</td>
+                        <td>${escapeHtml(c.size ?? c.floor_area ?? c.area ?? "N/A")}</td>
+                        <td>${escapeHtml(c.attraction ?? "N/A")}</td>
+                    </tr>
+                `).join("")}
+            </tbody>
+        </table>
+    `;
+}
+
+
+// -------------------------
+// Coordinate parser
+// -------------------------
 function parseCoordinates(text) {
-  /*
-    Supports:
-    42.229212, -71.805525
-    use 42.229212, -71.805525 and rerun...
-  */
-  const match = text.match(/(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)/);
+    const match = text.match(/(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)/);
+    if (!match) return null;
 
-  if (!match) {
-    return null;
-  }
+    const lat = Number(match[1]);
+    const lon = Number(match[2]);
 
-  const lat = Number(match[1]);
-  const lon = Number(match[2]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-    return null;
-  }
-
-  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-    return null;
-  }
-
-  return { lat, lon };
+    return { lat, lon };
 }
 
-function addBotMessage(text) {
-  addMessage(text, "bot");
-}
 
-function addUserMessage(text) {
-  addMessage(text, "user");
-}
-
-function addErrorMessage(text) {
-  addMessage(text, "error");
-}
+// -------------------------
+// Message helpers
+// -------------------------
+function addBotMessage(text)   { addMessage(text, "bot");   }
+function addUserMessage(text)  { addMessage(text, "user");  }
+function addErrorMessage(text) { addMessage(text, "error"); }
 
 function addMessage(text, type) {
-  const div = document.createElement("div");
-  div.className = `message ${type}`;
-  div.innerText = text;
-  chatMessages.appendChild(div);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
+    const div = document.createElement("div");
+    div.className  = `message ${type}`;
+    div.innerText  = text;
+    chatMessages.appendChild(div);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
 function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+    return String(value ?? "")
+        .replaceAll("&",  "&amp;")
+        .replaceAll("<",  "&lt;")
+        .replaceAll(">",  "&gt;")
+        .replaceAll('"',  "&quot;")
+        .replaceAll("'",  "&#039;");
 }
