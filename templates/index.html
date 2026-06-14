@@ -7,6 +7,43 @@
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="/static/styles.css" />
+
+  <style>
+    /* Module 9: Comparison table styling */
+    #comparisonSection {
+      margin-top: 20px;
+    }
+    #comparisonSection table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9em;
+    }
+    #comparisonSection th,
+    #comparisonSection td {
+      border: 1px solid #ddd;
+      padding: 8px 10px;
+      text-align: center;
+    }
+    #comparisonSection th {
+      background: #2c5282;
+      color: white;
+    }
+    #comparisonSection td:first-child {
+      text-align: left;
+      background: #f7fafc;
+    }
+    #comparisonSection td.better {
+      background: #c6f6d5;
+      font-weight: bold;
+    }
+
+    /* Module 9: Chart container */
+    #chartContainer {
+      display: none;
+      margin-top: 20px;
+      height: 220px;
+    }
+  </style>
 </head>
 
 <body>
@@ -17,6 +54,8 @@
   </header>
 
   <main class="layout">
+
+    <!-- Guided Chatbot Panel -->
     <section class="panel chat-panel">
       <h2>Guided Chatbot</h2>
 
@@ -29,9 +68,11 @@
 
       <div class="hint">
         Tip: click the map to choose the proposed store location.
+        You can enter a NAICS code or a business name like "hardware store".
       </div>
     </section>
 
+    <!-- Map Panel -->
     <section class="panel map-panel">
       <h2>Map</h2>
       <div id="map"></div>
@@ -40,6 +81,7 @@
       </div>
     </section>
 
+    <!-- Results Panel -->
     <section class="panel result-panel">
       <h2>Model Result</h2>
 
@@ -47,12 +89,29 @@
         No model result yet.
       </div>
 
+      <!-- Module 9: Chart comparing scenarios -->
+      <div id="chartContainer">
+        <canvas id="scenarioChart"></canvas>
+      </div>
+
       <h3>Nearby Competitors / Attraction Scores</h3>
-      <div id="competitorTable" class="table-wrap"></div>
+      <div id="competitorTable" class="table-wrap">
+        No competitor records returned.
+      </div>
+
+      <!-- Module 9: Location comparison table (appears after "compare" is requested) -->
+      <div id="comparisonSection"></div>
+
     </section>
+
   </main>
 
+  <!-- Leaflet -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Module 9: Chart.js for scenario comparison chart -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
   <script src="/static/map.js"></script>
   <script src="/static/chat.js"></script>
 </body>
