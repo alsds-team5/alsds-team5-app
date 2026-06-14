@@ -1,14 +1,15 @@
 // ============================================================
 // chat.js — Module 9 Improvements
 //
-// Changes from previous version:
+// Changes:
 // 1. Accepts business names (not just NAICS codes) via NAICS_LOOKUP
-// 2. Scenario history stored for follow-up and comparison
-// 3. Location comparison triggered by "compare" / "which is better"
-// 4. Chart.js bar chart updates after each model run
-// 5. Follow-up context: coordinates alone reuse stored business/area
-// 6. Topic-aware follow-up detection
+// 2. Ambiguous category detection with clarifying questions
+// 3. Scenario history stored for follow-up and comparison
+// 4. Location comparison triggered by "compare" / "which is better"
+// 5. Chart.js bar chart updates after each model run
+// 6. Follow-up context: coordinates alone reuse stored business/area
 // 7. Scenario labels (Location A, Location B, ...)
+// 8. Nearest competitor distance stored and shown in comparison
 // ============================================================
 
 const chatMessages = document.getElementById("chatMessages");
@@ -16,11 +17,9 @@ const chatInput    = document.getElementById("chatInput");
 const sendBtn      = document.getElementById("sendBtn");
 
 // -------------------------
-// Module 9: NAICS Lookup
-// Maps plain business names to NAICS codes in our database.
+// NAICS Lookup Dictionary
 // -------------------------
 const NAICS_LOOKUP = {
-    // Hardware / Home Improvement
     "hardware store":        "4441",
     "hardware":              "4441",
     "home improvement":      "4441",
@@ -30,34 +29,24 @@ const NAICS_LOOKUP = {
     "home depot":            "4441",
     "lowes":                 "4441",
     "lowe's":                "4441",
-
-    // Beer / Wine / Liquor
     "liquor store":          "445310",
     "wine store":            "445310",
     "beer store":            "445310",
     "alcohol store":         "445310",
     "liquor":                "445310",
-
-    // Auto Parts
     "auto parts":            "441310",
     "car parts":             "441310",
     "tire store":            "441310",
     "automotive parts":      "441310",
     "auto":                  "441310",
-
-    // Gas Station
     "gas station":           "447110",
     "petrol station":        "447110",
     "fuel station":          "447110",
     "gas":                   "447110",
-
-    // Jewelry
     "jewelry store":         "448310",
     "jewelry":               "448310",
     "luggage store":         "448310",
     "jewellery":             "448310",
-
-    // General Merchandise
     "general store":         "452319",
     "warehouse store":       "452319",
     "department store":      "452319",
@@ -65,35 +54,25 @@ const NAICS_LOOKUP = {
     "walmart":               "452319",
     "costco":                "452319",
     "target":                "452319",
-
-    // Bakery
     "bakery":                "311811",
     "bread store":           "311811",
     "pastry shop":           "311811",
     "cake shop":             "311811",
-
-    // Bank / Financial
     "bank":                  "522110",
     "credit union":          "522110",
     "financial services":    "522310",
     "investment office":     "523930",
     "insurance office":      "524113",
     "insurance":             "524113",
-
-    // Real Estate
     "real estate office":    "531210",
     "real estate agent":     "531210",
     "real estate":           "531210",
     "property rental":       "531120",
     "rental office":         "531120",
-
-    // Education
     "college":               "611310",
     "university":            "611310",
     "school":                "611310",
     "training center":       "611310",
-
-    // Healthcare
     "dentist":               "621210",
     "dental office":         "621210",
     "dental":                "621210",
@@ -103,16 +82,12 @@ const NAICS_LOOKUP = {
     "medical clinic":        "6214",
     "medical lab":           "621511",
     "diagnostic lab":        "621511",
-
-    // Personal Services
     "salon":                 "812910",
     "spa":                   "812910",
     "nail salon":            "812910",
     "barber":                "812910",
     "barbershop":            "812910",
     "personal services":     "812910",
-
-    // Telecom
     "phone store":           "517312",
     "telecom store":         "517312",
     "wireless store":        "517312",
@@ -147,13 +122,51 @@ const NAICS_NAMES = {
 };
 
 // -------------------------
+// Ambiguous Category Detection (Module 9)
+// When a user types a vague term, ask for clarification
+// instead of silently failing or guessing wrong.
+// -------------------------
+const AMBIGUOUS_CATEGORIES = {
+    "food":           "Food business could mean several things. Did you mean a bakery? That is the food category we have in our database. Type 'bakery' to proceed.",
+    "food business":  "Food business could mean several types. Did you mean a bakery? That is the food category we have in our database. Type 'bakery' to proceed.",
+    "food store":     "Food store could mean a bakery or a specialty food store. We have data for bakeries in our database. Type 'bakery' to proceed.",
+    "health":         "Health business could mean a dental office, outpatient clinic, or medical lab. Which one did you have in mind?",
+    "healthcare":     "Healthcare could mean a dental office, outpatient clinic, or medical lab. Which one did you have in mind?",
+    "medical":        "Medical could mean a dental office, outpatient clinic, or medical lab. Could you be more specific?",
+    "financial":      "Financial services could mean a bank, insurance office, or investment office. Which one did you have in mind?",
+    "finance":        "Financial services could mean a bank, insurance office, or investment office. Which one did you have in mind?",
+    "money":          "That could mean a bank or an insurance office. Which one did you mean?",
+    "real estate":    "Real estate could mean a real estate agent office or a property rental business. Which one did you mean?",
+    "property":       "Property could mean a real estate agent office or a property rental business. Which one did you mean?",
+    "store":          "That is a bit broad. Could you be more specific? For example: hardware store, gas station, jewelry store, or bakery.",
+    "shop":           "That is a bit broad. Could you be more specific? For example: hardware store, gas station, jewelry store, or bakery.",
+    "business":       "Could you describe your business type more specifically? For example: hardware store, bakery, dental office, or gas station.",
+    "retail":         "Could you describe your retail type more specifically? For example: hardware store, gas station, jewelry store, or general merchandise store.",
+    "service":        "Could you describe your service type more specifically? For example: dental office, salon, insurance office, or real estate agent.",
+    "services":       "Could you describe your service type more specifically? For example: dental office, salon, insurance office, or real estate agent.",
+};
+
+function getAmbiguousMessage(text) {
+    const lower = text.toLowerCase().trim();
+
+    // Exact match
+    if (AMBIGUOUS_CATEGORIES[lower]) return AMBIGUOUS_CATEGORIES[lower];
+
+    // Single-word ambiguous terms (only trigger if no better match exists)
+    const singleWordAmbiguous = ["store", "shop", "business", "retail", "service", "services", "health", "medical", "financial", "finance", "food", "property"];
+    if (singleWordAmbiguous.includes(lower)) {
+        return AMBIGUOUS_CATEGORIES[lower] || null;
+    }
+
+    return null;
+}
+
+// -------------------------
 // Scenario History (Module 9)
-// Stores each completed model run for comparison and follow-up.
 // -------------------------
 let scenarioHistory = [];
 let scenarioChart   = null;
 
-// Scenario label generator: Location A, Location B, ...
 function getScenarioLabel(index) {
     const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     return "Location " + (letters[index] || (index + 1));
@@ -165,7 +178,7 @@ function getScenarioLabel(index) {
 const state = {
     step:              "category",
     business_category: null,
-    business_name:     null,   // human-readable name
+    business_name:     null,
     candidate_lat:     null,
     candidate_lon:     null,
     floor_area:        null,
@@ -214,14 +227,12 @@ async function handleSend() {
     chatInput.value = "";
 
     try {
-        // 1. Check for a full rerun with all inputs in one message
         const rerunInputs = extractRerunInputs(text);
         if (rerunInputs) {
             await rerunModelFromMessage(rerunInputs);
             return;
         }
 
-        // 2. Initial guided flow
         if (state.step === "category") {
             await handleCategoryStep(text);
             return;
@@ -237,16 +248,13 @@ async function handleSend() {
             return;
         }
 
-        // 3. Post-run follow-up
         if (state.step === "ready") {
-            // Check for comparison request
             if (isComparisonRequest(text) && scenarioHistory.length >= 2) {
                 renderComparison();
                 await explainComparison(text);
                 return;
             }
 
-            // Check for coordinate-only follow-up (reuse stored business + area)
             const coords = parseCoordinates(text);
             if (coords && state.business_category && state.floor_area && !extractFullRerunInputs(text)) {
                 addBotMessage(
@@ -264,7 +272,6 @@ async function handleSend() {
                 return;
             }
 
-            // Regular follow-up question
             await askQuestion(text);
             return;
         }
@@ -293,6 +300,13 @@ async function handleCategoryStep(text) {
         return;
     }
 
+    // Check for ambiguous terms before trying to resolve
+    const ambiguousMsg = getAmbiguousMessage(text);
+    if (ambiguousMsg) {
+        addBotMessage(ambiguousMsg);
+        return; // Stay on category step and wait for a more specific answer
+    }
+
     // Try to resolve a plain business name
     const resolved = resolveBusinessName(text);
     if (resolved) {
@@ -307,7 +321,7 @@ async function handleCategoryStep(text) {
         return;
     }
 
-    // Try the backend resolver for anything not in the local dictionary
+    // Try the backend resolver
     try {
         const resp = await fetch("/api/resolve_category", {
             method: "POST",
@@ -328,7 +342,6 @@ async function handleCategoryStep(text) {
         }
     } catch (_) { /* fallthrough */ }
 
-    // Could not resolve
     addBotMessage(
         `I could not identify "${text.trim()}" as a business category. ` +
         "Please enter a numeric NAICS code (e.g., 4441 for hardware stores) " +
@@ -423,10 +436,22 @@ async function runModel() {
 
     state.last_result = data.result;
 
-    // Store in scenario history
+    // Load competitor POIs from Azure SQL and get nearest distance
+    let nearestKm = null;
+    if (window.loadCompetitorPois) {
+        nearestKm = await window.loadCompetitorPois(
+            state.business_category,
+            state.candidate_lat,
+            state.candidate_lon
+        );
+    } else if (window.plotCompetitors) {
+        window.plotCompetitors(data.result.competitors);
+    }
+
+    // Store in scenario history including nearest competitor distance
     const label = getScenarioLabel(scenarioHistory.length);
     scenarioHistory.push({
-        label:  label,
+        label:     label,
         inputs: {
             business_category: state.business_category,
             business_name:     state.business_name,
@@ -434,19 +459,12 @@ async function runModel() {
             lon:               state.candidate_lon,
             floor_area:        state.floor_area
         },
-        result: data.result
+        result:    data.result,
+        nearestKm: nearestKm
     });
 
-    // Update results panel and chart
     renderResult(data.result, label);
     updateScenarioChart();
-
-    // Load competitor POIs on map if available
-    if (window.loadCompetitorPois) {
-        window.loadCompetitorPois(state.business_category);
-    } else if (window.plotCompetitors) {
-        window.plotCompetitors(data.result.competitors);
-    }
 
     addBotMessage(
         data.explanation ||
@@ -454,7 +472,6 @@ async function runModel() {
         "provide new coordinates for another scenario, or type 'compare' to compare locations."
     );
 
-    // Hint about comparison once 2+ scenarios exist
     if (scenarioHistory.length === 2) {
         addBotMessage(
             "You now have two scenarios. Type 'compare locations' or 'which is better' to see a side-by-side comparison."
@@ -464,7 +481,7 @@ async function runModel() {
 
 
 // -------------------------
-// Ask follow-up question
+// Follow-up questions
 // -------------------------
 async function askQuestion(question) {
     if (!state.last_result) {
@@ -475,10 +492,7 @@ async function askQuestion(question) {
     const response = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            question,
-            result: state.last_result
-        })
+        body: JSON.stringify({ question, result: state.last_result })
     });
 
     const data = await response.json();
@@ -511,11 +525,11 @@ function renderComparison() {
     const section = document.getElementById("comparisonSection");
     if (!section || scenarioHistory.length < 2) return;
 
-    let tableRows = "";
     const headers = scenarioHistory.map(s => `<th>${escapeHtml(s.label)}</th>`).join("");
+    let tableRows = "";
 
-    // Predicted Visits row
-    const visits  = scenarioHistory.map(s => s.result.predicted_visits);
+    // Predicted Visits
+    const visits   = scenarioHistory.map(s => s.result.predicted_visits || 0);
     const maxVisit = Math.max(...visits);
     tableRows += `<tr>
         <td><strong>Predicted Visits</strong></td>
@@ -524,8 +538,8 @@ function renderComparison() {
         ).join("")}
     </tr>`;
 
-    // Market Share row
-    const shares   = scenarioHistory.map(s => s.result.market_share);
+    // Market Share
+    const shares   = scenarioHistory.map(s => s.result.market_share || 0);
     const maxShare = Math.max(...shares);
     tableRows += `<tr>
         <td><strong>Market Share</strong></td>
@@ -534,9 +548,9 @@ function renderComparison() {
         ).join("")}
     </tr>`;
 
-    // Competitors row
-    const comps    = scenarioHistory.map(s => typeof s.result.competitors === "number" ? s.result.competitors : 0);
-    const minComp  = Math.min(...comps);
+    // Competitors
+    const comps   = scenarioHistory.map(s => typeof s.result.competitors === "number" ? s.result.competitors : 0);
+    const minComp = Math.min(...comps);
     tableRows += `<tr>
         <td><strong>Competitors</strong></td>
         ${scenarioHistory.map((s, i) => {
@@ -545,13 +559,29 @@ function renderComparison() {
         }).join("")}
     </tr>`;
 
-    // Runtime row
+    // Nearest Competitor Distance (Module 9 - Item 3)
+    // Farther = better (less competition immediately nearby)
+    const dists   = scenarioHistory.map(s => s.nearestKm);
+    const hasData = dists.some(d => d !== null && d !== undefined);
+    if (hasData) {
+        const maxDist = Math.max(...dists.filter(d => d !== null && d !== undefined));
+        tableRows += `<tr>
+            <td><strong>Nearest Competitor</strong></td>
+            ${scenarioHistory.map((s, i) => {
+                const d = dists[i];
+                if (d === null || d === undefined) return `<td>N/A</td>`;
+                return `<td class="${d === maxDist ? "better" : ""}">${d.toFixed(2)} km away</td>`;
+            }).join("")}
+        </tr>`;
+    }
+
+    // Runtime
     tableRows += `<tr>
         <td><strong>Runtime (ms)</strong></td>
         ${scenarioHistory.map(s => `<td>${escapeHtml(s.result.runtime_ms)}</td>`).join("")}
     </tr>`;
 
-    // Inputs rows
+    // Inputs
     tableRows += `<tr>
         <td><strong>Business</strong></td>
         ${scenarioHistory.map(s => `<td>${escapeHtml(s.inputs.business_name || s.inputs.business_category)}</td>`).join("")}
@@ -570,20 +600,15 @@ function renderComparison() {
     section.innerHTML = `
         <h3>Location Comparison</h3>
         <p style="font-size:0.85em;color:#666;">
-            Green cells indicate the stronger result for that metric. 
+            Green cells indicate the stronger result for that metric.
+            For competitors and nearest competitor distance, fewer competitors
+            and farther distance are better.
             Note: this model does not account for rent, zoning, or parking.
         </p>
         <div class="table-wrap">
             <table>
-                <thead>
-                    <tr>
-                        <th>Metric</th>
-                        ${headers}
-                    </tr>
-                </thead>
-                <tbody>
-                    ${tableRows}
-                </tbody>
+                <thead><tr><th>Metric</th>${headers}</tr></thead>
+                <tbody>${tableRows}</tbody>
             </table>
         </div>
     `;
@@ -597,9 +622,10 @@ async function explainComparison(userQuestion) {
     const comparisonData = {
         type:      "location_comparison",
         scenarios: scenarioHistory.map(s => ({
-            label:  s.label,
-            inputs: s.inputs,
-            result: s.result
+            label:      s.label,
+            inputs:     s.inputs,
+            result:     s.result,
+            nearestKm:  s.nearestKm
         }))
     };
 
@@ -623,8 +649,6 @@ async function explainComparison(userQuestion) {
 
 // -------------------------
 // Chart (Module 9)
-// Bar chart showing predicted visits and market share across all scenarios.
-// Answers: "Which location attracts more traffic and captures more market share?"
 // -------------------------
 function updateScenarioChart() {
     const canvas = document.getElementById("scenarioChart");
@@ -632,21 +656,19 @@ function updateScenarioChart() {
 
     const labels = scenarioHistory.map(s => s.label);
     const visits = scenarioHistory.map(s => s.result.predicted_visits || 0);
-    const shares = scenarioHistory.map(s => parseFloat(
-        (s.result.market_share * 100).toFixed(2)
-    ));
+    const shares = scenarioHistory.map(s => parseFloat((s.result.market_share * 100).toFixed(2)));
 
     if (scenarioChart) {
-        scenarioChart.data.labels            = labels;
-        scenarioChart.data.datasets[0].data  = visits;
-        scenarioChart.data.datasets[1].data  = shares;
+        scenarioChart.data.labels           = labels;
+        scenarioChart.data.datasets[0].data = visits;
+        scenarioChart.data.datasets[1].data = shares;
         scenarioChart.update();
     } else {
         const ctx = canvas.getContext("2d");
         scenarioChart = new Chart(ctx, {
             type: "bar",
             data: {
-                labels:   labels,
+                labels,
                 datasets: [
                     {
                         label:           "Predicted Visits",
@@ -670,26 +692,12 @@ function updateScenarioChart() {
                 responsive:          true,
                 maintainAspectRatio: false,
                 plugins: {
-                    title: {
-                        display: true,
-                        text:    "Scenario Comparison: Visits and Market Share"
-                    },
+                    title:  { display: true, text: "Scenario Comparison: Visits and Market Share" },
                     legend: { position: "top" }
                 },
                 scales: {
-                    y: {
-                        type:     "linear",
-                        position: "left",
-                        title:    { display: true, text: "Predicted Visits" },
-                        beginAtZero: true
-                    },
-                    y1: {
-                        type:     "linear",
-                        position: "right",
-                        title:    { display: true, text: "Market Share (%)" },
-                        beginAtZero: true,
-                        grid:     { drawOnChartArea: false }
-                    }
+                    y:  { type: "linear", position: "left",  title: { display: true, text: "Predicted Visits" }, beginAtZero: true },
+                    y1: { type: "linear", position: "right", title: { display: true, text: "Market Share (%)" }, beginAtZero: true, grid: { drawOnChartArea: false } }
                 }
             }
         });
@@ -704,11 +712,9 @@ function updateScenarioChart() {
 // -------------------------
 function resolveBusinessName(text) {
     const lower = text.toLowerCase().trim();
-    // Exact match first
     if (NAICS_LOOKUP[lower]) {
         return { naics: NAICS_LOOKUP[lower], name: NAICS_NAMES[NAICS_LOOKUP[lower]] || lower };
     }
-    // Partial match (longest key first)
     const keys = Object.keys(NAICS_LOOKUP).sort((a, b) => b.length - a.length);
     for (const key of keys) {
         if (lower.includes(key)) {
@@ -720,34 +726,25 @@ function resolveBusinessName(text) {
 }
 
 function extractBusinessCategoryFromText(text) {
-    // Try numeric NAICS code first
     const naicsMatch = text.match(/(?:naics\s*(?:code)?\s*(?:is|=|:|of|for)?\s*)?(\b\d{4,6}\b)/i);
     if (naicsMatch) return { code: naicsMatch[1], name: NAICS_NAMES[naicsMatch[1]] || naicsMatch[1] };
-
-    // Try business name
     const resolved = resolveBusinessName(text);
     if (resolved) return { code: resolved.naics, name: resolved.name };
-
     return null;
 }
 
 function extractRerunInputs(message) {
     const coords = parseCoordinates(message);
     if (!coords) return null;
-
     const businessInfo = extractBusinessCategoryFromText(message);
     if (!businessInfo) return null;
-
     const areaMatch =
         message.match(/area\s*(?:of|is|=|:)?\s*([\d,]+(?:\.\d+)?)/i) ||
         message.match(/floor\s+area\s*(?:of|is|=|:)?\s*([\d,]+(?:\.\d+)?)/i) ||
         message.match(/([\d,]+(?:\.\d+)?)\s*(?:square\s+meters|square\s+metres|sqm|sq\.?\s*m|m2|m²)/i);
-
     if (!areaMatch) return null;
-
     const floorArea = Number(areaMatch[1].replace(/,/g, ""));
     if (!Number.isFinite(floorArea) || floorArea <= 0) return null;
-
     return {
         business_category: businessInfo.code,
         business_name:     businessInfo.name,
@@ -757,13 +754,11 @@ function extractRerunInputs(message) {
     };
 }
 
-// Checks if a message contains full inputs (used to avoid false follow-up detection)
 function extractFullRerunInputs(text) {
-    const coords = parseCoordinates(text);
-    if (!coords) return null;
+    const coords   = parseCoordinates(text);
     const business = extractBusinessCategoryFromText(text);
-    const areaMatch = text.match(/([\d,]+(?:\.\d+)?)\s*(?:square\s+meters|sqm|m2)/i);
-    return (coords && business && areaMatch) ? true : null;
+    const area     = text.match(/([\d,]+(?:\.\d+)?)\s*(?:square\s+meters|sqm|m2)/i);
+    return (coords && business && area) ? true : null;
 }
 
 
@@ -788,7 +783,6 @@ function renderResult(result, label) {
     `;
 
     const competitors = Array.isArray(result.competitors) ? result.competitors : [];
-
     if (competitors.length === 0) {
         tableWrap.innerHTML = "No competitor records returned.";
         return;
@@ -796,20 +790,13 @@ function renderResult(result, label) {
 
     tableWrap.innerHTML = `
         <table>
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Distance</th>
-                    <th>Size</th>
-                    <th>Attraction</th>
-                </tr>
-            </thead>
+            <thead><tr><th>Name</th><th>Distance</th><th>Size</th><th>Attraction</th></tr></thead>
             <tbody>
                 ${competitors.map(c => `
                     <tr>
-                        <td>${escapeHtml(c.name ?? c.place_name ?? c.poi_name ?? "Unknown")}</td>
+                        <td>${escapeHtml(c.name ?? c.place_name ?? "Unknown")}</td>
                         <td>${escapeHtml(c.distance_miles ?? c.distance ?? "N/A")}</td>
-                        <td>${escapeHtml(c.size ?? c.floor_area ?? c.area ?? "N/A")}</td>
+                        <td>${escapeHtml(c.size ?? c.floor_area ?? "N/A")}</td>
                         <td>${escapeHtml(c.attraction ?? "N/A")}</td>
                     </tr>
                 `).join("")}
@@ -825,13 +812,10 @@ function renderResult(result, label) {
 function parseCoordinates(text) {
     const match = text.match(/(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)/);
     if (!match) return null;
-
     const lat = Number(match[1]);
     const lon = Number(match[2]);
-
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
     if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
-
     return { lat, lon };
 }
 
@@ -844,7 +828,7 @@ function addUserMessage(text)  { addMessage(text, "user");  }
 function addErrorMessage(text) { addMessage(text, "error"); }
 
 function addMessage(text, type) {
-    const div = document.createElement("div");
+    const div      = document.createElement("div");
     div.className  = `message ${type}`;
     div.innerText  = text;
     chatMessages.appendChild(div);
