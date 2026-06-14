@@ -1,15 +1,5 @@
 // ============================================================
-// chat.js — Module 9 Improvements
-//
-// Changes:
-// 1. Accepts business names (not just NAICS codes) via NAICS_LOOKUP
-// 2. Ambiguous category detection with clarifying questions
-// 3. Scenario history stored for follow-up and comparison
-// 4. Location comparison triggered by "compare" / "which is better"
-// 5. Chart.js bar chart updates after each model run
-// 6. Follow-up context: coordinates alone reuse stored business/area
-// 7. Scenario labels (Location A, Location B, ...)
-// 8. Nearest competitor distance stored and shown in comparison
+// chat.js — Module 9 Final Version
 // ============================================================
 
 const chatMessages = document.getElementById("chatMessages");
@@ -17,7 +7,7 @@ const chatInput    = document.getElementById("chatInput");
 const sendBtn      = document.getElementById("sendBtn");
 
 // -------------------------
-// NAICS Lookup Dictionary
+// NAICS Lookup
 // -------------------------
 const NAICS_LOOKUP = {
     "hardware store":        "4441",
@@ -122,9 +112,7 @@ const NAICS_NAMES = {
 };
 
 // -------------------------
-// Ambiguous Category Detection (Module 9)
-// When a user types a vague term, ask for clarification
-// instead of silently failing or guessing wrong.
+// Ambiguous Category Detection
 // -------------------------
 const AMBIGUOUS_CATEGORIES = {
     "food":           "Food business could mean several things. Did you mean a bakery? That is the food category we have in our database. Type 'bakery' to proceed.",
@@ -148,21 +136,15 @@ const AMBIGUOUS_CATEGORIES = {
 
 function getAmbiguousMessage(text) {
     const lower = text.toLowerCase().trim();
-
-    // Exact match
     if (AMBIGUOUS_CATEGORIES[lower]) return AMBIGUOUS_CATEGORIES[lower];
-
-    // Single-word ambiguous terms (only trigger if no better match exists)
-    const singleWordAmbiguous = ["store", "shop", "business", "retail", "service", "services", "health", "medical", "financial", "finance", "food", "property"];
-    if (singleWordAmbiguous.includes(lower)) {
-        return AMBIGUOUS_CATEGORIES[lower] || null;
-    }
-
+    const singleWord = ["store", "shop", "business", "retail", "service", "services",
+                        "health", "medical", "financial", "finance", "food", "property"];
+    if (singleWord.includes(lower)) return AMBIGUOUS_CATEGORIES[lower] || null;
     return null;
 }
 
 // -------------------------
-// Scenario History (Module 9)
+// Scenario History
 // -------------------------
 let scenarioHistory = [];
 let scenarioChart   = null;
@@ -205,7 +187,6 @@ chatInput.addEventListener("keydown", function (event) {
 window.onMapLocationSelected = function (location) {
     state.candidate_lat = location.lat;
     state.candidate_lon = location.lon;
-
     if (state.step === "location") {
         addBotMessage(
             `Great, I captured the candidate location: ${location.lat.toFixed(6)}, ${location.lon.toFixed(6)}. ` +
@@ -237,24 +218,20 @@ async function handleSend() {
             await handleCategoryStep(text);
             return;
         }
-
         if (state.step === "location") {
             handleLocationStep(text);
             return;
         }
-
         if (state.step === "floor_area") {
             await handleFloorAreaStep(text);
             return;
         }
-
         if (state.step === "ready") {
             if (isComparisonRequest(text) && scenarioHistory.length >= 2) {
                 renderComparison();
                 await explainComparison(text);
                 return;
             }
-
             const coords = parseCoordinates(text);
             if (coords && state.business_category && state.floor_area && !extractFullRerunInputs(text)) {
                 addBotMessage(
@@ -271,11 +248,9 @@ async function handleSend() {
                 });
                 return;
             }
-
             await askQuestion(text);
             return;
         }
-
     } catch (error) {
         addErrorMessage(error.message || String(error));
     }
@@ -286,7 +261,6 @@ async function handleSend() {
 // Step handlers
 // -------------------------
 async function handleCategoryStep(text) {
-    // Accept numeric NAICS code directly
     if (/^\d+$/.test(text.trim())) {
         const naics = text.trim();
         state.business_category = naics;
@@ -300,14 +274,12 @@ async function handleCategoryStep(text) {
         return;
     }
 
-    // Check for ambiguous terms before trying to resolve
     const ambiguousMsg = getAmbiguousMessage(text);
     if (ambiguousMsg) {
         addBotMessage(ambiguousMsg);
-        return; // Stay on category step and wait for a more specific answer
+        return;
     }
 
-    // Try to resolve a plain business name
     const resolved = resolveBusinessName(text);
     if (resolved) {
         state.business_category = resolved.naics;
@@ -321,7 +293,6 @@ async function handleCategoryStep(text) {
         return;
     }
 
-    // Try the backend resolver
     try {
         const resp = await fetch("/api/resolve_category", {
             method: "POST",
@@ -340,7 +311,7 @@ async function handleCategoryStep(text) {
             );
             return;
         }
-    } catch (_) { /* fallthrough */ }
+    } catch (_) { }
 
     addBotMessage(
         `I could not identify "${text.trim()}" as a business category. ` +
@@ -355,35 +326,28 @@ function handleLocationStep(text) {
         addBotMessage("Please click the map or type coordinates in this format: 42.24, -71.78");
         return;
     }
-
     state.candidate_lat = coords.lat;
     state.candidate_lon = coords.lon;
-
     if (window.setCandidateLocation) {
         window.setCandidateLocation(coords.lat, coords.lon, false);
     }
-
     state.step = "floor_area";
     addBotMessage("Great. Now enter the proposed store floor area in square meters.");
 }
 
 async function handleFloorAreaStep(text) {
     const area = Number(text.replace(/,/g, ""));
-
     if (!Number.isFinite(area) || area <= 0) {
         addBotMessage("Please enter a positive numeric floor area, such as 1000.");
         return;
     }
-
     state.floor_area = area;
     state.step = "ready";
-
     addBotMessage(
         `Thanks. I will run the Huff model for ${state.business_name || "NAICS " + state.business_category}, ` +
         `location (${state.candidate_lat.toFixed(6)}, ${state.candidate_lon.toFixed(6)}), ` +
         `and floor area ${state.floor_area} square meters.`
     );
-
     await runModel();
 }
 
@@ -398,17 +362,14 @@ async function rerunModelFromMessage(inputs) {
     state.candidate_lon     = inputs.candidate_lon;
     state.floor_area        = inputs.floor_area;
     state.step              = "ready";
-
     addBotMessage(
         `Running the model for ${state.business_name}, ` +
         `location (${state.candidate_lat.toFixed(6)}, ${state.candidate_lon.toFixed(6)}), ` +
         `floor area ${state.floor_area} sqm.`
     );
-
     if (window.setCandidateLocation) {
         window.setCandidateLocation(state.candidate_lat, state.candidate_lon, false);
     }
-
     await runModel();
 }
 
@@ -429,14 +390,13 @@ async function runModel() {
     });
 
     const data = await response.json();
-
     if (!response.ok || !data.ok) {
         throw new Error(data.error || "Model failed.");
     }
 
     state.last_result = data.result;
 
-    // Load competitor POIs from Azure SQL and get nearest distance
+    // Load competitor POIs on map and get nearest distance
     let nearestKm = null;
     if (window.loadCompetitorPois) {
         nearestKm = await window.loadCompetitorPois(
@@ -448,10 +408,17 @@ async function runModel() {
         window.plotCompetitors(data.result.competitors);
     }
 
-    // Store in scenario history including nearest competitor distance
+    // Load top 5 nearest competitors into results panel
+    await loadNearestCompetitors(
+        state.business_category,
+        state.candidate_lat,
+        state.candidate_lon
+    );
+
+    // Store in scenario history
     const label = getScenarioLabel(scenarioHistory.length);
     scenarioHistory.push({
-        label:     label,
+        label,
         inputs: {
             business_category: state.business_category,
             business_name:     state.business_name,
@@ -481,6 +448,58 @@ async function runModel() {
 
 
 // -------------------------
+// Nearest Competitors (Module 9 - Item 1 fix)
+// Calls /api/nearest_competitors and populates the competitor table
+// with real names, categories, and distances from Azure SQL.
+// -------------------------
+async function loadNearestCompetitors(naics, lat, lon) {
+    try {
+        const url = `/api/nearest_competitors?naics=${encodeURIComponent(naics)}&lat=${lat}&lon=${lon}&n=5`;
+        const response = await fetch(url);
+        const data     = await response.json();
+
+        if (!data.ok || !Array.isArray(data.competitors) || data.competitors.length === 0) {
+            return;
+        }
+
+        renderNearestCompetitors(data.competitors, data.total_found);
+
+    } catch (error) {
+        console.warn("Could not load nearest competitors:", error);
+    }
+}
+
+function renderNearestCompetitors(competitors, totalFound) {
+    const tableWrap = document.getElementById("competitorTable");
+
+    const note = totalFound > competitors.length
+        ? `<p style="font-size:0.85em;color:#666;">Showing 5 nearest of ${totalFound} total competitors in this category.</p>`
+        : `<p style="font-size:0.85em;color:#666;">${totalFound} competitor(s) found in this category.</p>`;
+
+    tableWrap.innerHTML = note + `
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Category</th>
+                    <th>Distance</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${competitors.map(c => `
+                    <tr>
+                        <td>${escapeHtml(c.location_name || "Unknown")}</td>
+                        <td>${escapeHtml(c.top_category  || "N/A")}</td>
+                        <td>${c.distance_km !== null ? c.distance_km + " km" : "N/A"}</td>
+                    </tr>
+                `).join("")}
+            </tbody>
+        </table>
+    `;
+}
+
+
+// -------------------------
 // Follow-up questions
 // -------------------------
 async function askQuestion(question) {
@@ -488,25 +507,21 @@ async function askQuestion(question) {
         addBotMessage("Please complete a model run first.");
         return;
     }
-
     const response = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question, result: state.last_result })
     });
-
     const data = await response.json();
-
     if (!response.ok || !data.ok) {
         throw new Error(data.error || "The assistant could not answer.");
     }
-
     addBotMessage(data.answer);
 }
 
 
 // -------------------------
-// Comparison (Module 9)
+// Comparison
 // -------------------------
 function isComparisonRequest(text) {
     const lower = text.toLowerCase();
@@ -525,77 +540,56 @@ function renderComparison() {
     const section = document.getElementById("comparisonSection");
     if (!section || scenarioHistory.length < 2) return;
 
-    const headers = scenarioHistory.map(s => `<th>${escapeHtml(s.label)}</th>`).join("");
-    let tableRows = "";
+    const headers  = scenarioHistory.map(s => `<th>${escapeHtml(s.label)}</th>`).join("");
+    let tableRows  = "";
 
-    // Predicted Visits
     const visits   = scenarioHistory.map(s => s.result.predicted_visits || 0);
     const maxVisit = Math.max(...visits);
-    tableRows += `<tr>
-        <td><strong>Predicted Visits</strong></td>
+    tableRows += `<tr><td><strong>Predicted Visits</strong></td>
         ${scenarioHistory.map((s, i) =>
             `<td class="${visits[i] === maxVisit ? "better" : ""}">${escapeHtml(s.result.predicted_visits)}</td>`
-        ).join("")}
-    </tr>`;
+        ).join("")}</tr>`;
 
-    // Market Share
     const shares   = scenarioHistory.map(s => s.result.market_share || 0);
     const maxShare = Math.max(...shares);
-    tableRows += `<tr>
-        <td><strong>Market Share</strong></td>
+    tableRows += `<tr><td><strong>Market Share</strong></td>
         ${scenarioHistory.map((s, i) =>
             `<td class="${shares[i] === maxShare ? "better" : ""}">${(s.result.market_share * 100).toFixed(2)}%</td>`
-        ).join("")}
-    </tr>`;
+        ).join("")}</tr>`;
 
-    // Competitors
     const comps   = scenarioHistory.map(s => typeof s.result.competitors === "number" ? s.result.competitors : 0);
     const minComp = Math.min(...comps);
-    tableRows += `<tr>
-        <td><strong>Competitors</strong></td>
+    tableRows += `<tr><td><strong>Competitors</strong></td>
         ${scenarioHistory.map((s, i) => {
             const val = typeof s.result.competitors === "number" ? s.result.competitors : "N/A";
             return `<td class="${comps[i] === minComp ? "better" : ""}">${escapeHtml(val)}</td>`;
-        }).join("")}
-    </tr>`;
+        }).join("")}</tr>`;
 
-    // Nearest Competitor Distance (Module 9 - Item 3)
-    // Farther = better (less competition immediately nearby)
     const dists   = scenarioHistory.map(s => s.nearestKm);
     const hasData = dists.some(d => d !== null && d !== undefined);
     if (hasData) {
         const maxDist = Math.max(...dists.filter(d => d !== null && d !== undefined));
-        tableRows += `<tr>
-            <td><strong>Nearest Competitor</strong></td>
+        tableRows += `<tr><td><strong>Nearest Competitor</strong></td>
             ${scenarioHistory.map((s, i) => {
                 const d = dists[i];
                 if (d === null || d === undefined) return `<td>N/A</td>`;
                 return `<td class="${d === maxDist ? "better" : ""}">${d.toFixed(2)} km away</td>`;
-            }).join("")}
-        </tr>`;
+            }).join("")}</tr>`;
     }
 
-    // Runtime
-    tableRows += `<tr>
-        <td><strong>Runtime (ms)</strong></td>
-        ${scenarioHistory.map(s => `<td>${escapeHtml(s.result.runtime_ms)}</td>`).join("")}
-    </tr>`;
+    tableRows += `<tr><td><strong>Runtime (ms)</strong></td>
+        ${scenarioHistory.map(s => `<td>${escapeHtml(s.result.runtime_ms)}</td>`).join("")}</tr>`;
 
-    // Inputs
-    tableRows += `<tr>
-        <td><strong>Business</strong></td>
-        ${scenarioHistory.map(s => `<td>${escapeHtml(s.inputs.business_name || s.inputs.business_category)}</td>`).join("")}
-    </tr>`;
-    tableRows += `<tr>
-        <td><strong>Floor Area (sqm)</strong></td>
-        ${scenarioHistory.map(s => `<td>${escapeHtml(s.inputs.floor_area)}</td>`).join("")}
-    </tr>`;
-    tableRows += `<tr>
-        <td><strong>Coordinates</strong></td>
+    tableRows += `<tr><td><strong>Business</strong></td>
+        ${scenarioHistory.map(s => `<td>${escapeHtml(s.inputs.business_name || s.inputs.business_category)}</td>`).join("")}</tr>`;
+
+    tableRows += `<tr><td><strong>Floor Area (sqm)</strong></td>
+        ${scenarioHistory.map(s => `<td>${escapeHtml(s.inputs.floor_area)}</td>`).join("")}</tr>`;
+
+    tableRows += `<tr><td><strong>Coordinates</strong></td>
         ${scenarioHistory.map(s =>
             `<td>${s.inputs.lat.toFixed(4)}, ${s.inputs.lon.toFixed(4)}</td>`
-        ).join("")}
-    </tr>`;
+        ).join("")}</tr>`;
 
     section.innerHTML = `
         <h3>Location Comparison</h3>
@@ -618,27 +612,21 @@ function renderComparison() {
 
 async function explainComparison(userQuestion) {
     if (scenarioHistory.length < 2) return;
-
-    const comparisonData = {
-        type:      "location_comparison",
-        scenarios: scenarioHistory.map(s => ({
-            label:      s.label,
-            inputs:     s.inputs,
-            result:     s.result,
-            nearestKm:  s.nearestKm
-        }))
-    };
-
     try {
         const response = await fetch("/api/ask", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 question: userQuestion || "Compare these locations and explain which performs better and why.",
-                result:   comparisonData
+                result:   {
+                    type:      "location_comparison",
+                    scenarios: scenarioHistory.map(s => ({
+                        label: s.label, inputs: s.inputs,
+                        result: s.result, nearestKm: s.nearestKm
+                    }))
+                }
             })
         });
-
         const data = await response.json();
         if (data.ok) addBotMessage(data.answer);
     } catch (e) {
@@ -648,7 +636,7 @@ async function explainComparison(userQuestion) {
 
 
 // -------------------------
-// Chart (Module 9)
+// Chart
 // -------------------------
 function updateScenarioChart() {
     const canvas = document.getElementById("scenarioChart");
@@ -670,39 +658,23 @@ function updateScenarioChart() {
             data: {
                 labels,
                 datasets: [
-                    {
-                        label:           "Predicted Visits",
-                        data:            visits,
-                        backgroundColor: "rgba(54, 162, 235, 0.75)",
-                        borderColor:     "rgba(54, 162, 235, 1)",
-                        borderWidth:     1,
-                        yAxisID:         "y"
-                    },
-                    {
-                        label:           "Market Share (%)",
-                        data:            shares,
-                        backgroundColor: "rgba(255, 99, 132, 0.75)",
-                        borderColor:     "rgba(255, 99, 132, 1)",
-                        borderWidth:     1,
-                        yAxisID:         "y1"
-                    }
+                    { label: "Predicted Visits",  data: visits, backgroundColor: "rgba(54, 162, 235, 0.75)", borderColor: "rgba(54, 162, 235, 1)", borderWidth: 1, yAxisID: "y"  },
+                    { label: "Market Share (%)",  data: shares, backgroundColor: "rgba(255, 99, 132, 0.75)", borderColor: "rgba(255, 99, 132, 1)", borderWidth: 1, yAxisID: "y1" }
                 ]
             },
             options: {
-                responsive:          true,
-                maintainAspectRatio: false,
+                responsive: true, maintainAspectRatio: false,
                 plugins: {
                     title:  { display: true, text: "Scenario Comparison: Visits and Market Share" },
                     legend: { position: "top" }
                 },
                 scales: {
-                    y:  { type: "linear", position: "left",  title: { display: true, text: "Predicted Visits" }, beginAtZero: true },
-                    y1: { type: "linear", position: "right", title: { display: true, text: "Market Share (%)" }, beginAtZero: true, grid: { drawOnChartArea: false } }
+                    y:  { type: "linear", position: "left",  title: { display: true, text: "Predicted Visits"  }, beginAtZero: true },
+                    y1: { type: "linear", position: "right", title: { display: true, text: "Market Share (%)"  }, beginAtZero: true, grid: { drawOnChartArea: false } }
                 }
             }
         });
     }
-
     canvas.parentElement.style.display = "block";
 }
 
@@ -712,9 +684,7 @@ function updateScenarioChart() {
 // -------------------------
 function resolveBusinessName(text) {
     const lower = text.toLowerCase().trim();
-    if (NAICS_LOOKUP[lower]) {
-        return { naics: NAICS_LOOKUP[lower], name: NAICS_NAMES[NAICS_LOOKUP[lower]] || lower };
-    }
+    if (NAICS_LOOKUP[lower]) return { naics: NAICS_LOOKUP[lower], name: NAICS_NAMES[NAICS_LOOKUP[lower]] || lower };
     const keys = Object.keys(NAICS_LOOKUP).sort((a, b) => b.length - a.length);
     for (const key of keys) {
         if (lower.includes(key)) {
@@ -745,13 +715,7 @@ function extractRerunInputs(message) {
     if (!areaMatch) return null;
     const floorArea = Number(areaMatch[1].replace(/,/g, ""));
     if (!Number.isFinite(floorArea) || floorArea <= 0) return null;
-    return {
-        business_category: businessInfo.code,
-        business_name:     businessInfo.name,
-        candidate_lat:     coords.lat,
-        candidate_lon:     coords.lon,
-        floor_area:        floorArea
-    };
+    return { business_category: businessInfo.code, business_name: businessInfo.name, candidate_lat: coords.lat, candidate_lon: coords.lon, floor_area: floorArea };
 }
 
 function extractFullRerunInputs(text) {
@@ -782,27 +746,11 @@ function renderResult(result, label) {
         <strong>Notes:</strong> ${escapeHtml(notes)}
     `;
 
-    const competitors = Array.isArray(result.competitors) ? result.competitors : [];
-    if (competitors.length === 0) {
-        tableWrap.innerHTML = "No competitor records returned.";
-        return;
+    // Competitor table is populated by loadNearestCompetitors()
+    // Only show placeholder if it hasn't been populated yet
+    if (tableWrap.innerHTML.trim() === "" || tableWrap.innerHTML === "No competitor records returned.") {
+        tableWrap.innerHTML = "Loading nearby competitors...";
     }
-
-    tableWrap.innerHTML = `
-        <table>
-            <thead><tr><th>Name</th><th>Distance</th><th>Size</th><th>Attraction</th></tr></thead>
-            <tbody>
-                ${competitors.map(c => `
-                    <tr>
-                        <td>${escapeHtml(c.name ?? c.place_name ?? "Unknown")}</td>
-                        <td>${escapeHtml(c.distance_miles ?? c.distance ?? "N/A")}</td>
-                        <td>${escapeHtml(c.size ?? c.floor_area ?? "N/A")}</td>
-                        <td>${escapeHtml(c.attraction ?? "N/A")}</td>
-                    </tr>
-                `).join("")}
-            </tbody>
-        </table>
-    `;
 }
 
 
@@ -828,9 +776,9 @@ function addUserMessage(text)  { addMessage(text, "user");  }
 function addErrorMessage(text) { addMessage(text, "error"); }
 
 function addMessage(text, type) {
-    const div      = document.createElement("div");
-    div.className  = `message ${type}`;
-    div.innerText  = text;
+    const div     = document.createElement("div");
+    div.className = `message ${type}`;
+    div.innerText = text;
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
