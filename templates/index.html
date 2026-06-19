@@ -48,9 +48,28 @@
 
 <body>
   <header>
-    <h1>AI-Assisted Location Decision Support System</h1>
-    <h2>Team H2</h2>
-    <p>Worcester, MA | Huff Model Prototype</p>
+    <div class="header-inner">
+      <div class="header-title">
+        <h1>AI-Assisted Location Decision Support System</h1>
+        <p>Worcester, MA &nbsp;·&nbsp; Huff Gravity Model &nbsp;·&nbsp; Team H2</p>
+      </div>
+      <div class="header-steps">
+        <div class="step">
+          <span class="step-num">1</span>
+          <span class="step-label">Choose a location<br><small>Click the map</small></span>
+        </div>
+        <div class="step-arrow">→</div>
+        <div class="step">
+          <span class="step-num">2</span>
+          <span class="step-label">Describe your store<br><small>Chat below</small></span>
+        </div>
+        <div class="step-arrow">→</div>
+        <div class="step">
+          <span class="step-num">3</span>
+          <span class="step-label">Read the result<br><small>Right panel</small></span>
+        </div>
+      </div>
+    </div>
   </header>
 
   <main class="layout">
@@ -62,22 +81,23 @@
       <div id="chatMessages" class="chat-messages"></div>
 
       <div class="input-row">
-        <input id="chatInput" type="text" placeholder="Type your answer or question..." />
+        <input id="chatInput" type="text" placeholder="Type your answer or question…" />
         <button id="sendBtn">Send</button>
       </div>
 
       <div class="hint">
-        Tip: click the map to choose the proposed store location.
-        You can enter a NAICS code or a business name like "hardware store".
+        <strong>Tips:</strong> Click the map to set your candidate location.
+        You can enter a NAICS code (e.g. <code>4441</code>) or a plain business name
+        like <em>"hardware store"</em>.
       </div>
     </section>
 
     <!-- Map Panel -->
     <section class="panel map-panel">
-      <h2>Map</h2>
+      <h2>Map <span class="map-legend"><span class="legend-dot blue"></span> Candidate &nbsp; <span class="legend-dot red"></span> Competitors</span></h2>
       <div id="map"></div>
       <div id="selectedLocation" class="selected-location">
-        No candidate location selected yet.
+        📍 No candidate location selected yet — click the map above.
       </div>
     </section>
 
@@ -85,8 +105,11 @@
     <section class="panel result-panel">
       <h2>Model Result</h2>
 
+      <!-- Module 8: KPI summary cards injected here by chat.js when result arrives -->
+      <div id="kpiCards" class="kpi-cards" style="display:none"></div>
+
       <div id="resultSummary" class="result-summary">
-        No model result yet.
+        No model result yet. Complete the chatbot steps to run the Huff model.
       </div>
 
       <!-- Module 9: Chart comparing scenarios -->
@@ -94,9 +117,29 @@
         <canvas id="scenarioChart"></canvas>
       </div>
 
+      <!-- Module 8: collapsible model info -->
+      <details class="model-info">
+        <summary>About this model &amp; assumptions</summary>
+        <p>
+          The <strong>Huff Gravity Model</strong> estimates the probability that customers
+          from each Census Block Group (CBG) will visit a proposed store rather than a
+          competitor. Attraction is proportional to floor area and inversely proportional
+          to travel distance (raised to a calibrated exponent α).
+        </p>
+        <p>
+          <strong>Inputs:</strong> proposed location (lat/lon), business category (NAICS),
+          and store floor area (sq ft).
+        </p>
+        <p>
+          <strong>Limitations:</strong> results depend on data availability and calibration
+          quality. Treat outputs as estimates for comparative analysis, not precise
+          predictions.
+        </p>
+      </details>
+
       <h3>Nearby Competitors / Attraction Scores</h3>
       <div id="competitorTable" class="table-wrap">
-        No competitor records returned.
+        <p class="empty-state">No competitor records returned yet.</p>
       </div>
 
       <!-- Module 9: Location comparison table (appears after "compare" is requested) -->
