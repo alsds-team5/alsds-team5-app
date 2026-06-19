@@ -738,6 +738,24 @@ function renderResult(result, label) {
     const runtime         = result.runtime_ms ?? "N/A";
     const notes           = result.notes ?? "";
 
+    // Module 8: populate KPI cards with the two key decision numbers
+    const kpiCards = document.getElementById("kpiCards");
+    if (kpiCards) {
+        const shareDisplay = Number.isFinite(marketShare) ? (marketShare * 100).toFixed(2) + "%" : "N/A";
+        const visitsDisplay = Number.isFinite(Number(predictedVisits)) ? Number(predictedVisits).toFixed(1) : String(predictedVisits);
+        kpiCards.style.display = "grid";
+        kpiCards.innerHTML = `
+            <div class="kpi-card">
+                <div class="kpi-value">${escapeHtml(shareDisplay)}</div>
+                <div class="kpi-label">Market Share</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-value">${escapeHtml(visitsDisplay)}</div>
+                <div class="kpi-label">Predicted Visits</div>
+            </div>
+        `;
+    }
+
     summary.innerHTML = `
         ${label ? `<div style="font-weight:bold;margin-bottom:6px;color:#2c5282;">${escapeHtml(label)}</div>` : ""}
         <strong>Predicted Visits:</strong> ${escapeHtml(predictedVisits)}<br>
