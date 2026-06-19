@@ -696,10 +696,20 @@ function resolveBusinessName(text) {
 }
 
 function extractBusinessCategoryFromText(text) {
-    const naicsMatch = text.match(/(?:naics\s*(?:code)?\s*(?:is|=|:|of|for)?\s*)?(\b\d{4,6}\b)/i);
-    if (naicsMatch) return { code: naicsMatch[1], name: NAICS_NAMES[naicsMatch[1]] || naicsMatch[1] };
+    // Only treat a number as NAICS if explicitly prefixed with "naics"
+    // This prevents "1000 square meters" from being mistaken for a NAICS code.
+    const explicitNaics = text.match(/naics\s*(?:code)?\s*(?:is|=|:|of|for)?\s*(\b\d{4,6}\b)/i);
+    if (explicitNaics && NAICS_NAMES[explicitNaics[1]]) {
+        return { code: explicitNaics[1], name: NAICS_NAMES[explicitNaics[1]] };
+    }
+    // Try business name lookup first (most reliable for plain-language input)
     const resolved = resolveBusinessName(text);
     if (resolved) return { code: resolved.naics, name: resolved.name };
+    // Fall back: a bare standalone number that exists in our known NAICS list
+    const bareNumber = text.match(/\b(\d{4,6})\b/);
+    if (bareNumber && NAICS_NAMES[bareNumber[1]]) {
+        return { code: bareNumber[1], name: NAICS_NAMES[bareNumber[1]] };
+    }
     return null;
 }
 
