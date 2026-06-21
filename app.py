@@ -389,6 +389,34 @@ def api_run_huff():
         if floor_area <= 0:
             return jsonify({"ok": False, "error": "floor_area must be greater than zero."}), 400
 
+        # ── NAICS Validation (professor requirement) ──────────────────
+        # Case 3: NAICS code not in POIs data at all → refuse to run
+        try:
+            conn   = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM pois p
+                LEFT JOIN category_parameters cp ON p.top_category = cp.top_category
+                WHERE cp.naics_code = ?
+                  AND p.latitude  IS NOT NULL
+                  AND p.longitude IS NOT NULL
+            """, (business_category,))
+            poi_count = cursor.fetchone()[0]
+            conn.close()
+        except Exception:
+            poi_count = -1  # DB error — allow model to run, huff_engine handles it
+
+        if poi_count == 0:
+            return jsonify({
+                "ok": False,
+                "error": (
+                    f"There are no historical records for NAICS code {business_category} "
+                    "in our data, so the model cannot produce results for this business category. "
+                    "Please try a different NAICS code or business type."
+                )
+            }), 400
+        # ── End NAICS Validation ───────────────────────────────────────
+
         result      = run_huff_model(
             candidate_lat=candidate_lat,
             candidate_lon=candidate_lon,
