@@ -181,7 +181,7 @@ header {
 /* ── Layout ─────────────────────────────────────────── */
 .layout {
   display: grid;
-  grid-template-columns: 400px 1fr;
+  grid-template-columns: 480px 1fr;
   grid-template-rows: minmax(520px, 62vh) auto;
   gap: 14px;
   padding: 14px;
