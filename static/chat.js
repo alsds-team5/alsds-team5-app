@@ -168,6 +168,24 @@ const state = {
 };
 
 // -------------------------
+// Fix 1: Dynamic flow step highlighter
+// Maps chat.js state names → which header step box is active
+// -------------------------
+function updateFlowStep(stepName) {
+    const stepMap = { category: 1, location: 2, floor_area: 3, ready: 4 };
+    const active  = stepMap[stepName] || 1;
+    for (let i = 1; i <= 4; i++) {
+        const el = document.getElementById("step-" + i);
+        if (!el) continue;
+        el.classList.remove("active", "done");
+        if (i === active) el.classList.add("active");
+        else if (i < active) el.classList.add("done");
+    }
+}
+// Highlight step 1 on load
+updateFlowStep("category");
+
+// -------------------------
 // Welcome message
 // -------------------------
 addBotMessage(
@@ -193,6 +211,7 @@ window.onMapLocationSelected = function (location) {
             "Now enter the proposed store floor area in square meters."
         );
         state.step = "floor_area";
+        updateFlowStep("floor_area");
     }
 };
 
@@ -271,6 +290,7 @@ async function handleCategoryStep(text) {
             "Now click the proposed store location on the map. " +
             "You can also type coordinates as: 42.24, -71.78"
         );
+        updateFlowStep("location");
         return;
     }
 
@@ -290,6 +310,7 @@ async function handleCategoryStep(text) {
             "Now click the proposed store location on the map. " +
             "You can also type coordinates as: 42.24, -71.78"
         );
+        updateFlowStep("location");
         return;
     }
 
@@ -309,6 +330,7 @@ async function handleCategoryStep(text) {
                 "Now click the proposed store location on the map, " +
                 "or type coordinates as: 42.24, -71.78"
             );
+            updateFlowStep("location");
             return;
         }
     } catch (_) { }
@@ -332,6 +354,7 @@ function handleLocationStep(text) {
         window.setCandidateLocation(coords.lat, coords.lon, false);
     }
     state.step = "floor_area";
+    updateFlowStep("floor_area");
     addBotMessage("Great. Now enter the proposed store floor area in square meters.");
 }
 
@@ -343,6 +366,7 @@ async function handleFloorAreaStep(text) {
     }
     state.floor_area = area;
     state.step = "ready";
+    updateFlowStep("ready");
     addBotMessage(
         `Thanks. I will run the Huff model for ${state.business_name || "NAICS " + state.business_category}, ` +
         `location (${state.candidate_lat.toFixed(6)}, ${state.candidate_lon.toFixed(6)}), ` +
@@ -362,6 +386,7 @@ async function rerunModelFromMessage(inputs) {
     state.candidate_lon     = inputs.candidate_lon;
     state.floor_area        = inputs.floor_area;
     state.step              = "ready";
+    updateFlowStep("ready");
     addBotMessage(
         `Running the model for ${state.business_name}, ` +
         `location (${state.candidate_lat.toFixed(6)}, ${state.candidate_lon.toFixed(6)}), ` +
@@ -658,24 +683,90 @@ function updateScenarioChart() {
             data: {
                 labels,
                 datasets: [
-                    { label: "Predicted Visits",  data: visits, backgroundColor: "rgba(54, 162, 235, 0.75)", borderColor: "rgba(54, 162, 235, 1)", borderWidth: 1, yAxisID: "y"  },
-                    { label: "Market Share (%)",  data: shares, backgroundColor: "rgba(255, 99, 132, 0.75)", borderColor: "rgba(255, 99, 132, 1)", borderWidth: 1, yAxisID: "y1" }
+                    {
+                        label: "Predicted Visits",
+                        data: visits,
+                        backgroundColor: "rgba(37, 99, 235, 0.75)",
+                        borderColor: "rgba(37, 99, 235, 1)",
+                        borderWidth: 1,
+                        yAxisID: "y",
+                        order: 1
+                    },
+                    {
+                        label: "Market Share (%)",
+                        data: shares,
+                        backgroundColor: "rgba(220, 38, 38, 0.75)",
+                        borderColor: "rgba(220, 38, 38, 1)",
+                        borderWidth: 1,
+                        yAxisID: "y1",
+                        order: 2
+                    }
                 ]
             },
             options: {
-                responsive: true, maintainAspectRatio: false,
+                responsive: true,
+                maintainAspectRatio: false,
                 plugins: {
-                    title:  { display: true, text: "Scenario Comparison: Visits and Market Share" },
-                    legend: { position: "top" }
+                    title: {
+                        display: true,
+                        text: "Scenario Comparison: Predicted Visits vs Market Share",
+                        font: { size: 14, weight: "600" },
+                        padding: { bottom: 16 }
+                    },
+                    legend: {
+                        position: "top",
+                        labels: { font: { size: 13 }, padding: 20, usePointStyle: true }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                const label = ctx.dataset.label || "";
+                                const val   = ctx.parsed.y;
+                                if (label.includes("Market Share")) return `${label}: ${val.toFixed(2)}%`;
+                                return `${label}: ${val.toLocaleString()}`;
+                            }
+                        }
+                    }
                 },
                 scales: {
-                    y:  { type: "linear", position: "left",  title: { display: true, text: "Predicted Visits"  }, beginAtZero: true },
-                    y1: { type: "linear", position: "right", title: { display: true, text: "Market Share (%)"  }, beginAtZero: true, grid: { drawOnChartArea: false } }
+                    x: {
+                        ticks: { font: { size: 12 } }
+                    },
+                    y: {
+                        type: "linear",
+                        position: "left",
+                        title: {
+                            display: true,
+                            text: "▲  Predicted Visits",
+                            font: { size: 13, weight: "700" },
+                            color: "rgba(37, 99, 235, 1)",
+                            padding: { bottom: 8 }
+                        },
+                        ticks: { font: { size: 12 }, color: "rgba(37, 99, 235, 0.85)" },
+                        beginAtZero: true,
+                        grid: { color: "rgba(37, 99, 235, 0.08)" }
+                    },
+                    y1: {
+                        type: "linear",
+                        position: "right",
+                        title: {
+                            display: true,
+                            text: "Market Share (%)  ▲",
+                            font: { size: 13, weight: "700" },
+                            color: "rgba(220, 38, 38, 1)",
+                            padding: { bottom: 8 }
+                        },
+                        ticks: { font: { size: 12 }, color: "rgba(220, 38, 38, 0.85)" },
+                        beginAtZero: true,
+                        grid: { drawOnChartArea: false }
+                    }
                 }
             }
         });
     }
     canvas.parentElement.style.display = "block";
+    const lbl = document.getElementById("chartSectionLabel");
+    if (lbl) lbl.style.display = "block";
 }
 
 
