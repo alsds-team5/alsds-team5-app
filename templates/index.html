@@ -40,8 +40,23 @@
     /* Module 9: Chart container */
     #chartContainer {
       display: none;
-      margin-top: 20px;
-      height: 220px;
+      margin-top: 28px;
+      margin-bottom: 8px;
+      padding: 16px 12px 8px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      height: 320px;
+    }
+
+    #chartSectionLabel {
+      font-size: 11px;
+      color: #64748b;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      display: none;
     }
 
     /* App description banner */
@@ -86,23 +101,15 @@
     <div class="header-inner">
       <div class="header-title">
         <h1>AI-Assisted Location Decision Support System</h1>
-        <p>Worcester, MA &nbsp;·&nbsp; Huff Gravity Model &nbsp;·&nbsp; Team H2 &nbsp;·&nbsp; Hatim &amp; Han</p>
-      </div>
-      <div class="header-steps">
-        <div class="step">
-          <span class="step-num">1</span>
-          <span class="step-label">Choose a location<br><small>Click the map</small></span>
-        </div>
-        <div class="step-arrow">→</div>
-        <div class="step">
-          <span class="step-num">2</span>
-          <span class="step-label">Describe your store<br><small>Chat below</small></span>
-        </div>
-        <div class="step-arrow">→</div>
-        <div class="step">
-          <span class="step-num">3</span>
-          <span class="step-label">Read the result<br><small>Right panel</small></span>
-        </div>
+        <p class="header-subtitle">Worcester, MA &nbsp;·&nbsp; Huff Gravity Model &nbsp;·&nbsp; Retail Site Analysis</p>
+        <p class="header-credits">
+          <span class="credit-badge">Team H2</span>
+          <span class="credit-name">Hatim Al-Shaikh</span>
+          <span class="credit-sep">·</span>
+          <span class="credit-name">Han Lin</span>
+          <span class="credit-sep">·</span>
+          <span class="credit-course">DS 595 — Urban Analytics</span>
+        </p>
       </div>
     </div>
   </header>
@@ -139,6 +146,29 @@
     <section class="panel chat-panel">
       <h2>Guided Chatbot</h2>
 
+      <!-- Fix 1: Dynamic flow steps — always visible in the chat panel -->
+      <div class="chat-flow-steps">
+        <div class="step" id="step-1">
+          <span class="step-num">1</span>
+          <span class="step-label">Business type</span>
+        </div>
+        <div class="step-arrow">→</div>
+        <div class="step" id="step-2">
+          <span class="step-num">2</span>
+          <span class="step-label">Location</span>
+        </div>
+        <div class="step-arrow">→</div>
+        <div class="step" id="step-3">
+          <span class="step-num">3</span>
+          <span class="step-label">Floor area</span>
+        </div>
+        <div class="step-arrow">→</div>
+        <div class="step" id="step-4">
+          <span class="step-num">4</span>
+          <span class="step-label">Result ready</span>
+        </div>
+      </div>
+
       <div id="chatMessages" class="chat-messages"></div>
 
       <div class="input-row">
@@ -173,6 +203,7 @@
       </div>
 
       <!-- Module 9: Chart comparing scenarios -->
+      <p id="chartSectionLabel">📊 Scenario Comparison — Predicted Visits (left axis) &nbsp;|&nbsp; Market Share % (right axis)</p>
       <div id="chartContainer">
         <canvas id="scenarioChart"></canvas>
       </div>
