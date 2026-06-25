@@ -19,8 +19,7 @@ body {
 header {
   background: #0f172a;
   color: white;
-  padding: 20px 32px;
-  border-bottom: 3px solid #2563eb;
+  padding: 14px 28px;
 }
 
 .header-inner {
@@ -28,107 +27,59 @@ header {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 12px;
 }
 
 .header-title h1 {
-  margin: 0 0 6px 0;
-  font-size: 24px;
-  font-weight: 800;
-  letter-spacing: -0.5px;
-  line-height: 1.15;
+  margin: 0 0 4px 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
 }
 
-.header-subtitle {
-  margin: 0 0 8px 0;
+.header-title p {
+  margin: 0;
   color: #94a3b8;
   font-size: 13px;
-}
-
-.header-credits {
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.credit-badge {
-  background: #2563eb;
-  color: white;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 20px;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-}
-
-.credit-name {
-  color: #e2e8f0;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.credit-sep {
-  color: #475569;
-  font-size: 13px;
-}
-
-.credit-course {
-  color: #64748b;
-  font-size: 12px;
-  font-style: italic;
 }
 
 /* Fix 1: flow steps inside chat panel */
 .chat-flow-steps {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   margin-bottom: 12px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  flex-wrap: nowrap;
 }
 
 .chat-flow-steps .step {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
   background: rgba(255,255,255,0.6);
   border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 5px 10px;
-  flex: 1;
-  min-width: 0;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  transition: all 0.25s;
 }
 
 .chat-flow-steps .step-num {
   background: #94a3b8;
   color: white;
   border-radius: 50%;
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
-  flex-shrink: 0;
   transition: background 0.25s;
-}
-
-.chat-flow-steps .step-label {
-  font-size: 11px;
-  color: #6b7280;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: color 0.25s;
 }
 
 .chat-flow-steps .step-arrow {
@@ -139,9 +90,8 @@ header {
 
 /* Active and done states */
 .chat-flow-steps .step.active {
-  background: #eff6ff;
   border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
 }
 
 .chat-flow-steps .step.active .step-num {
@@ -149,22 +99,12 @@ header {
   box-shadow: 0 0 6px rgba(59, 130, 246, 0.5);
 }
 
-.chat-flow-steps .step.active .step-label {
-  color: #1d4ed8;
-  font-weight: 600;
-}
-
-.chat-flow-steps .step.done {
-  background: #f0fdf4;
-  border-color: #86efac;
-}
-
 .chat-flow-steps .step.done .step-num {
   background: #16a34a;
 }
 
-.chat-flow-steps .step.done .step-label {
-  color: #15803d;
+.chat-flow-steps .step.done {
+  border-color: #86efac;
 }
 
 /* ── Layout ─────────────────────────────────────────── */
