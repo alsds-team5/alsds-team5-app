@@ -154,15 +154,27 @@
     <section class="panel chat-panel">
       <h2>Guided Chatbot</h2>
 
-      <!-- Fix 1: Dynamic flow steps — always visible in the chat panel -->
+      <!-- Fix 1: Dynamic flow steps — sticky inside chat panel -->
       <div class="chat-flow-steps">
-        <div class="step" id="step-1"><span class="step-num">1</span></div>
+        <div class="step" id="step-1">
+          <span class="step-num">1</span>
+          <span class="step-label">Business Type</span>
+        </div>
         <div class="step-arrow">→</div>
-        <div class="step" id="step-2"><span class="step-num">2</span></div>
+        <div class="step" id="step-2">
+          <span class="step-num">2</span>
+          <span class="step-label">Location</span>
+        </div>
         <div class="step-arrow">→</div>
-        <div class="step" id="step-3"><span class="step-num">3</span></div>
+        <div class="step" id="step-3">
+          <span class="step-num">3</span>
+          <span class="step-label">Floor Area</span>
+        </div>
         <div class="step-arrow">→</div>
-        <div class="step" id="step-4"><span class="step-num">4</span></div>
+        <div class="step" id="step-4">
+          <span class="step-num">4</span>
+          <span class="step-label">Result Ready</span>
+        </div>
       </div>
 
       <div id="chatMessages" class="chat-messages"></div>
